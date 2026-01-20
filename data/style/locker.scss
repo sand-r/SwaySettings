@@ -2,13 +2,20 @@
 
 $drop-shadow: 0 0 30px rgba(0, 0, 0, 0.4);
 $avatar-size: 128px;
-$date-fg-color: rgba(white, 0.5);
+$locker-fg-color: white;
+$locker-fg-color-dim: rgba(white, 0.5);
 $blur-fade-ms: 300ms;
 $blur-fade-ease: ease-out;
 $blur-amount: 10px;
 
 lockerwindow {
   background: transparent;
+
+  // Force light text for all labels on the locker (over wallpaper)
+  label {
+    color: $locker-fg-color;
+    text-shadow: $drop-shadow;
+  }
 
   .locker-wallpaper {
     transition: filter $blur-fade-ease $blur-fade-ms;
@@ -18,23 +25,19 @@ lockerwindow {
     filter: blur($blur-amount);
   }
 
-  label {
-    text-shadow: $drop-shadow;
-  }
-
   .locker-time-box {
     margin-top: 64px;
 
     .locker-time {
       font-size: 128px;
       font-weight: bold;
-      color: $date-fg-color;
+      color: $locker-fg-color-dim;
     }
 
     .locker-date {
       font-size: 32px;
       font-weight: bold;
-      color: $date-fg-color;
+      color: $locker-fg-color-dim;
     }
   }
 
@@ -50,15 +53,28 @@ lockerwindow {
     .locker-name {
       font-size: 18px;
       margin: 6px;
+      color: $locker-fg-color;
     }
 
     .locker-entry {
       box-shadow: $drop-shadow;
       margin: 32px 4px 4px 4px;
       border-radius: 100px;
+      background: rgba(0, 0, 0, 0.3);
+      color: $locker-fg-color;
 
       & text {
         margin: 0 4px;
+        color: $locker-fg-color;
+        caret-color: $locker-fg-color;
+
+        & placeholder {
+          color: $locker-fg-color-dim;
+        }
+      }
+
+      & image {
+        color: $locker-fg-color-dim;
       }
     }
 
@@ -66,12 +82,12 @@ lockerwindow {
       margin: 4px 0;
 
       &.error banner widget {
-        color: var(--error_fg_color);
+        color: #ff6b6b;
       }
 
       banner widget {
         background: transparent;
-        color: var(--window_fg_color);
+        color: $locker-fg-color;
         padding: 0 32px;
         margin: 4px;
         border-radius: 100px;
