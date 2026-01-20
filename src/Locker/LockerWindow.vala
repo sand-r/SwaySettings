@@ -60,13 +60,14 @@ public class LockerWindow : Gtk.ApplicationWindow {
 
     [GtkChild]
     unowned Gtk.Entry entry;
-    [GtkChild]
-    unowned Gtk.Button button;
 
     [GtkChild]
     unowned Gtk.Revealer status_revealer;
     [GtkChild]
     unowned Gtk.Box status;
+
+    // Default placeholder when no fingerprint
+    private const string DEFAULT_PLACEHOLDER = "Enter Password";
 
     private Cancellable load_cancellable = new Cancellable ();
     private bool loaded_user_data = false;
@@ -86,6 +87,8 @@ public class LockerWindow : Gtk.ApplicationWindow {
             entry.set_position (-1);
             if (active) {
                 add_css_class ("focused");
+                // Re-check fingerprint on focus (handles resume from suspend)
+                check_fingerprint_on_focus ();
             } else {
                 remove_css_class ("focused");
             }
@@ -99,9 +102,7 @@ public class LockerWindow : Gtk.ApplicationWindow {
             }
         });
         lock_data.notify["show-password"].connect (set_password_visibility);
-        entry.activate.connect (() => button.clicked ());
-
-        button.clicked.connect (password_check);
+        entry.activate.connect (password_check);
 
         set_date_time ();
         time_object.update.connect (set_date_time);
@@ -112,6 +113,98 @@ public class LockerWindow : Gtk.ApplicationWindow {
         map.connect (() => {
             add_css_class ("locked");
         });
+
+        // Initialize fingerprint (on first window) and set up UI handlers
+        setup_fingerprint_ui ();
+    }
+
+    private static bool fingerprint_initialized = false;
+
+    private void setup_fingerprint_ui () {
+        debug ("LockerWindow: setup_fingerprint_ui called, initialized=%s", fingerprint_initialized.to_string ());
+        var fprint = FingerprintManager.get_instance ();
+
+        // Don't initialize fingerprint here - do it on focus (after resume from suspend)
+        // This avoids "device busy" errors during before-sleep
+        if (!fingerprint_initialized) {
+            // Connect to app shutdown for cleanup
+            app.shutdown.connect (() => {
+                fprint.release_device ();
+            });
+        }
+
+        fprint.status_changed.connect ((status, is_error) => {
+            update_fingerprint_status (status);
+        });
+
+        fprint.auth_success.connect (() => {
+            entry.set_placeholder_text ("Unlocked");
+            entry.set_icon_from_paintable (Gtk.EntryIconPosition.PRIMARY, null);
+            fprint.release_device ();  // Release before unlocking
+            if (should_lock) {
+                instance.unlock ();
+            } else {
+                app.quit ();
+            }
+        });
+
+        fprint.availability_changed.connect ((available) => {
+            debug ("LockerWindow: availability_changed to %s", available.to_string ());
+            update_fingerprint_ui (available);
+        });
+
+        // Update UI based on current availability
+        debug ("LockerWindow: fprint.available = %s", fprint.available.to_string ());
+        update_fingerprint_ui (fprint.available);
+
+        // Suspend fingerprint and reset placeholder when typing password
+        entry.changed.connect (() => {
+            if (lock_data.pwd_buffer.length > 0) {
+                fprint.suspended = true;
+                entry.set_icon_from_paintable (Gtk.EntryIconPosition.PRIMARY, null);
+            }
+        });
+    }
+
+    private void update_fingerprint_ui (bool available) {
+        if (available) {
+            entry.set_icon_from_icon_name (Gtk.EntryIconPosition.PRIMARY, "auth-fingerprint-symbolic");
+            // Don't override placeholder if user is typing
+            if (lock_data.pwd_buffer.length == 0) {
+                entry.set_placeholder_text ("Touch sensor");
+            }
+        } else {
+            // Must use set_icon_from_paintable to fully remove icon space
+            entry.set_icon_from_paintable (Gtk.EntryIconPosition.PRIMARY, null);
+            entry.set_placeholder_text (DEFAULT_PLACEHOLDER);
+        }
+    }
+
+    private void check_fingerprint_on_focus () {
+        var fprint = FingerprintManager.get_instance ();
+
+        // Initialize fingerprint on first focus (after resume from suspend)
+        // This avoids "device busy" errors during before-sleep
+        if (!fingerprint_initialized) {
+            fingerprint_initialized = true;
+            debug ("LockerWindow: initializing fingerprint on focus");
+            fprint.init ();
+        }
+
+        // If fingerprint is available but not verifying (e.g. after suspend), restart
+        if (fprint.available && !fprint.verifying && !fprint.suspended) {
+            fprint.start_verify ();
+        }
+
+        // Update UI
+        update_fingerprint_ui (fprint.available);
+    }
+
+    private void update_fingerprint_status (string status) {
+        // Only update placeholder if entry is empty
+        if (lock_data.pwd_buffer.length == 0) {
+            entry.set_placeholder_text (status);
+        }
     }
 
     private Adw.Banner get_message_banner (string message, bool error) {
@@ -243,6 +336,8 @@ public class LockerWindow : Gtk.ApplicationWindow {
                 lock_data.messages.append ("Login Failed");
                 break;
             case pam_status.PAM_STATUS_AUTH_SUCESS:
+                // Release fingerprint device before unlocking
+                FingerprintManager.get_instance ().release_device ();
                 if (should_lock) {
                     instance.unlock ();
                 } else {
@@ -252,6 +347,10 @@ public class LockerWindow : Gtk.ApplicationWindow {
         }
 
         entry.grab_focus ();
+
+        // Resume fingerprint after failed password attempt
+        var fprint = FingerprintManager.get_instance ();
+        fprint.suspended = false;
 
         lock_data.pwd_checked ();
     }
@@ -264,7 +363,6 @@ public class LockerWindow : Gtk.ApplicationWindow {
         }
 
         entry.set_sensitive (!busy);
-        button.set_sensitive (!busy);
         if (!busy) {
             entry.grab_focus ();
         }

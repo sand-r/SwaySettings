@@ -1,24 +1,22 @@
 namespace SwaySettings {
     public class BluetoothPage : Page {
 
-        private const string NEARBY_EMPTY_TEXT = "No devices found";
-        private const string PAIRED_EMPTY_TEXT = "No devices paired";
+        private const string NEARBY_EMPTY_TEXT = "No nearby devices";
+        private const string PAIRED_EMPTY_TEXT = "No paired devices";
 
         Gtk.Stack stack;
-        Gtk.Box error_box;
-        Gtk.Box bluetooth_box;
+        Adw.StatusPage status_page;
         Gtk.ScrolledWindow scrolled_window;
 
-        public string error_text { get; private set; }
-
-        Gtk.Label status_label;
-        Gtk.Switch status_switch;
+        Adw.SwitchRow status_row;
         bool pending_status_switch = false;
 
         Gtk.Spinner discovering_spinner;
 
+        Adw.PreferencesGroup paired_group;
         Gtk.ListBox paired_list_box;
 
+        Adw.PreferencesGroup nearby_group;
         Gtk.ListBox nearby_list_box;
 
         Bluez.Daemon daemon;
@@ -39,102 +37,78 @@ namespace SwaySettings {
             // Init Bluetooth Daemon
             this.daemon = new Bluez.Daemon ();
 
-            Gtk.Box content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
-            set_child (content_box);
-
-            // Bluetooth status
-            Gtk.Box status_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
-            Gtk.Box toggle_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
-            status_box.append (toggle_box);
-            Adw.Clamp clamp = get_clamped_widget (status_box, false);
-            content_box.append (clamp);
-
-            Gtk.Label title_label = new Gtk.Label ("Bluetooth") {
-                hexpand = true,
-                halign = Gtk.Align.START,
-                valign = Gtk.Align.CENTER,
-            };
-            // TODO: Replace with title-1?
-            title_label.add_css_class ("large-title");
-            toggle_box.append (title_label);
-
-            this.status_switch = new Gtk.Switch () {
-                halign = Gtk.Align.END,
-                valign = Gtk.Align.CENTER,
-            };
-            toggle_box.append (this.status_switch);
-
-            // Discoverable Label
-            this.status_label = new Gtk.Label (null) {
-                hexpand = true,
-                halign = Gtk.Align.START,
-                valign = Gtk.Align.CENTER,
-                visible = true,
-            };
-            this.status_label.add_css_class ("subtitle");
-            status_box.append (this.status_label);
-
-            // Bluetooth devices
+            // Main stack for switching between content and error states
             stack = new Gtk.Stack () {
-                // TODO: FIX fade when disabled
                 transition_type = Gtk.StackTransitionType.CROSSFADE,
                 vhomogeneous = false,
-            };
-            // stack.set_transition_type (Gtk.StackTransitionType.CROSSFADE);
-
-            // Add the main GTK Box
-            bluetooth_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
-            this.scrolled_window = get_scroll_widget (bluetooth_box);
-            stack.add_child (this.scrolled_window);
-
-            // Error Page
-            error_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 16) {
-                sensitive = false,
                 vexpand = true,
-                valign = Gtk.Align.CENTER,
             };
-            stack.add_child (error_box);
-            // Error Image
-            Gtk.Image error_image = new Gtk.Image () {
-                pixel_size = 128,
-            };
-            error_image.set_from_icon_name ("bluetooth-symbolic");
-            error_box.append (error_image);
-            // Error Label
-            Gtk.Label error_label = new Gtk.Label (null);
-            this.bind_property ("error-text",
-                                error_label, "label",
-                                BindingFlags.SYNC_CREATE);
-            error_box.append (error_label);
+            set_child (stack);
 
-            // Setup each ListBox
-            // Paired List Box
+            // Main content area
+            var content_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 24) {
+                valign = Gtk.Align.START,
+            };
+            this.scrolled_window = get_scroll_widget (content_box);
+            stack.add_named (this.scrolled_window, "content");
+
+            // Bluetooth toggle group
+            var toggle_group = new Adw.PreferencesGroup ();
+            content_box.append (toggle_group);
+
+            this.status_row = new Adw.SwitchRow () {
+                title = "Bluetooth",
+            };
+            toggle_group.add (this.status_row);
+
+            // Paired devices group
+            paired_group = new Adw.PreferencesGroup () {
+                title = "Paired Devices",
+            };
+            content_box.append (paired_group);
+
             paired_list_box = new Gtk.ListBox () {
                 valign = Gtk.Align.START,
                 selection_mode = Gtk.SelectionMode.NONE,
             };
-            Gtk.Box paired_box = get_list_box (true,
-                                               ref paired_list_box,
-                                               "Paired Devices");
-            bluetooth_box.append (paired_box);
-            // Nearby List Box
+            paired_list_box.add_css_class ("boxed-list");
+            paired_list_box.set_sort_func ((Gtk.ListBoxSortFunc) this.list_box_sort_func);
+            paired_list_box.set_placeholder (create_placeholder (PAIRED_EMPTY_TEXT));
+            paired_group.add (paired_list_box);
+
+            // Nearby devices group with spinner in header
+            nearby_group = new Adw.PreferencesGroup () {
+                title = "Nearby Devices",
+            };
+            content_box.append (nearby_group);
+
+            this.discovering_spinner = new Gtk.Spinner () {
+                valign = Gtk.Align.CENTER,
+            };
+            nearby_group.set_header_suffix (this.discovering_spinner);
+
             nearby_list_box = new Gtk.ListBox () {
-                valign = Gtk.Align.FILL,
+                valign = Gtk.Align.START,
                 selection_mode = Gtk.SelectionMode.NONE,
             };
-            Gtk.Box nearby_box = get_list_box (false,
-                                               ref nearby_list_box,
-                                               "Nearby Devices");
-            bluetooth_box.append (nearby_box);
+            nearby_list_box.add_css_class ("boxed-list");
+            nearby_list_box.set_sort_func ((Gtk.ListBoxSortFunc) this.list_box_sort_func);
+            nearby_list_box.set_placeholder (create_placeholder (NEARBY_EMPTY_TEXT));
+            nearby_group.add (nearby_list_box);
 
-            content_box.append (stack);
+            // Status page for errors/disabled state
+            status_page = new Adw.StatusPage () {
+                icon_name = "bluetooth-symbolic",
+                vexpand = true,
+            };
+            stack.add_named (status_page, "status");
 
             remove_signals ();
             add_signals ();
 
-            // Bind the discoverable bool value to the Label text
+            // Bind discoverable to subtitle
             this.daemon.bind_property ("discoverable",
-                                       status_label, "label",
+                                       status_row, "subtitle",
                                        BindingFlags.SYNC_CREATE,
                                        (bind, from_value, ref to_value) => {
                 to_value = "";
@@ -150,60 +124,13 @@ namespace SwaySettings {
             this.powered_state_change_cb ();
         }
 
-        Gtk.Box get_list_box (bool is_paired,
-                              ref Gtk.ListBox list_box,
-                              string title) {
-            list_box.add_css_class ("content");
-            // Sets the sorting function
-            list_box.set_sort_func ((Gtk.ListBoxSortFunc) this.list_box_sort_func);
-            // Add placeholder
-            var placeholder_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 12) {
-                vexpand = true,
-                hexpand = true,
-                valign = Gtk.Align.CENTER,
-                halign = Gtk.Align.CENTER,
-                margin_top = 24,
-                margin_bottom = 24,
-                margin_start = 24,
-                margin_end = 24,
-                sensitive = false,
+        Gtk.Widget create_placeholder (string text) {
+            var placeholder = new Adw.StatusPage () {
+                icon_name = "bluetooth-symbolic",
+                title = text,
             };
-
-            Gtk.Image placeholder_image = new Gtk.Image () {
-                pixel_size = 72,
-            };
-            placeholder_image.set_from_icon_name ("bluetooth-symbolic");
-            placeholder_box.append (placeholder_image);
-            // Error Label
-            Gtk.Label placeholder_label = new Gtk.Label (
-                is_paired ? PAIRED_EMPTY_TEXT : NEARBY_EMPTY_TEXT);
-            placeholder_box.append (placeholder_label);
-
-            list_box.set_placeholder (placeholder_box);
-
-            var _box = new Gtk.Box (Gtk.Orientation.VERTICAL, 10) {
-                valign = is_paired ? Gtk.Align.START : Gtk.Align.FILL,
-                vexpand = !is_paired,
-            };
-
-            var label = new Gtk.Label (title) {
-                halign = Gtk.Align.START,
-                valign = Gtk.Align.CENTER,
-            };
-            if (!is_paired) {
-                var spinner_box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
-                spinner_box.append (label);
-                _box.append (spinner_box);
-
-                // Add discovering spinner
-                this.discovering_spinner = new Gtk.Spinner ();
-                spinner_box.append (this.discovering_spinner);
-            } else {
-                _box.append (label);
-            }
-
-            _box.append (list_box);
-            return _box;
+            placeholder.add_css_class ("compact");
+            return placeholder;
         }
 
         [CCode (instance_pos = -1)]
@@ -235,7 +162,7 @@ namespace SwaySettings {
             this.daemon.notify["powered"].connect (this.powered_state_change_cb);
             this.daemon.notify["rfkill-blocking"].connect (this.powered_state_change_cb);
             this.daemon.notify["discovering"].connect (this.discovering_cb);
-            this.status_switch.state_set.connect (this.status_switch_cb);
+            this.status_row.notify["active"].connect (this.status_switch_cb);
         }
 
         void remove_signals () {
@@ -248,19 +175,19 @@ namespace SwaySettings {
             this.daemon.notify["powered"].disconnect (this.powered_state_change_cb);
             this.daemon.notify["rfkill-blocking"].disconnect (this.powered_state_change_cb);
             this.daemon.notify["discovering"].disconnect (this.discovering_cb);
-            this.status_switch.state_set.disconnect (this.status_switch_cb);
+            this.status_row.notify["active"].disconnect (this.status_switch_cb);
         }
 
         void adapter_added_cb (Bluez.Adapter1 adapter) {
-            error_text = "";
             powered_state_change_cb ();
         }
 
         void adapter_removed_cb (Bluez.Adapter1 adapter) {
             var adapters = this.daemon.get_adapters ();
             if (adapters.is_empty ()) {
-                error_text = "No Bluetooth Adapters available";
-                stack.set_visible_child (error_box);
+                status_page.title = "No Bluetooth Adapters";
+                status_page.description = "Connect a Bluetooth adapter to use Bluetooth";
+                stack.set_visible_child_name ("status");
             }
         }
 
@@ -327,23 +254,23 @@ namespace SwaySettings {
          * Called when ever the status switch is clicked.
          * Waits until the powered state changes.
          */
-        bool status_switch_cb (Gtk.Switch _switch, bool state) {
+        void status_switch_cb () {
+            bool state = this.status_row.active;
             pending_status_switch = true;
-            _switch.sensitive = false;
-            _switch.state_set.disconnect (this.status_switch_cb);
+            this.status_row.sensitive = false;
+            this.status_row.notify["active"].disconnect (this.status_switch_cb);
             this.daemon.change_bluetooth_state.begin (state, () => {
                 pending_status_switch = false;
-                _switch.sensitive = true;
-                _switch.set_state (state);
-                _switch.state_set.connect (this.status_switch_cb);
+                this.status_row.sensitive = true;
+                this.status_row.notify["active"].connect (this.status_switch_cb);
             });
-            return true;
         }
 
         void bus_state_change_cb (bool state) {
             if (!state) {
-                error_text = "The Bluetooth service is not running...";
-                stack.set_visible_child (error_box);
+                status_page.title = "Bluetooth Service Unavailable";
+                status_page.description = "The Bluetooth service is not running";
+                stack.set_visible_child_name ("status");
             } else {
                 this.powered_state_change_cb ();
                 this.daemon.register_agent.begin (
@@ -363,16 +290,15 @@ namespace SwaySettings {
         void powered_state_change_cb () {
             bool powered = this.daemon.powered;
             bool blocking = this.daemon.rfkill_blocking;
-            this.status_switch.state_set.disconnect (this.status_switch_cb);
+            this.status_row.notify["active"].disconnect (this.status_switch_cb);
             if (!blocking && powered) {
-                stack.set_visible_child (scrolled_window);
-                if (!pending_status_switch) status_switch.set_active (true);
+                stack.set_visible_child_name ("content");
+                if (!pending_status_switch) this.status_row.active = true;
             } else {
-                error_text = "Bluetooth is disabled";
-                stack.set_visible_child (error_box);
-                if (!pending_status_switch) status_switch.set_active (false);
+                stack.set_visible_child_name ("content");
+                if (!pending_status_switch) this.status_row.active = false;
             }
-            this.status_switch.state_set.connect (this.status_switch_cb);
+            this.status_row.notify["active"].connect (this.status_switch_cb);
         }
     }
 }

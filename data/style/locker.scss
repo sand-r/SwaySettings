@@ -52,22 +52,13 @@ lockerwindow {
       margin: 6px;
     }
 
-    & > box {
-      margin-top: 32px;
+    .locker-entry {
+      box-shadow: $drop-shadow;
+      margin: 32px 4px 4px 4px;
+      border-radius: 100px;
 
-      .locker-entry {
-        box-shadow: $drop-shadow;
-        margin: 4px;
-        border-radius: 100px;
-
-        & text {
-          margin: 0 4px;
-        }
-      }
-
-      .locker-unlock {
-        box-shadow: $drop-shadow;
-        margin: 4px;
+      & text {
+        margin: 0 4px;
       }
     }
 
@@ -86,5 +77,6 @@ lockerwindow {
         border-radius: 100px;
       }
     }
+
   }
 }

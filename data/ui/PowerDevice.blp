@@ -1,49 +1,35 @@
 using Gtk 4.0;
+using Adw 1;
 
-template $SwaySettingsPowerDevice: ListBoxRow {
+template $SwaySettingsPowerDevice: Adw.ActionRow {
   selectable: false;
   activatable: false;
 
-  child: Box {
+  [prefix]
+  Image icon {
+    pixel-size: 32;
+  }
+
+  [suffix]
+  Box {
     orientation: horizontal;
     spacing: 8;
+    valign: center;
 
-    Image icon {
-      pixel-size: 48;
+    Label battery_charging_state {
+      styles [
+        "dim-label"
+      ]
     }
 
-    Box {
-      orientation: vertical;
-
-      Label device_name {
-        xalign: 0;
-        vexpand: true;
-      }
-
-      Box {
-        vexpand: true;
-        orientation: horizontal;
-
-        Label battery_charging_state {
-          xalign: 0;
-        }
-
-        Separator separator {
-          orientation: horizontal;
-          valign: center;
-          width-request: 8;
-          margin-start: 8;
-          margin-end: 8;
-        }
-
-        Image battery_icon {
-          pixel-size: 24;
-        }
-
-        Label battery_percent {
-          xalign: 0;
-        }
-      }
+    Image battery_icon {
+      pixel-size: 16;
     }
-  };
+
+    Label battery_percent {
+      styles [
+        "dim-label"
+      ]
+    }
+  }
 }

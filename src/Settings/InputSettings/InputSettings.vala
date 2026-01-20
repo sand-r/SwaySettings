@@ -412,13 +412,13 @@ namespace SwaySettings {
                     value = BoolEnum.parse_string (node.get_string ());
                     return true;
                 case "click-method":
-                    value = AccelProfiles.parse_string (node.get_string ());
+                    value = ClickMethods.parse_string (node.get_string ());
                     return true;
                 case "scroll-method":
-                    value = AccelProfiles.parse_string (node.get_string ());
+                    value = ScrollMethods.parse_string (node.get_string ());
                     return true;
                 case "tap-button-map":
-                    value = AccelProfiles.parse_string (node.get_string ());
+                    value = TapButtonMaps.parse_string (node.get_string ());
                     return true;
                 default:
                     break;

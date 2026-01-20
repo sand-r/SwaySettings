@@ -1,6 +1,6 @@
 namespace SwaySettings {
     [GtkTemplate (ui = "/org/erikreider/swaysettings/ui/BluetoothDeviceRow.ui")]
-    class BluetoothDeviceRow : Gtk.ListBoxRow {
+    class BluetoothDeviceRow : Adw.ActionRow {
         public enum State {
             UNPAIRED,
             PAIRING,
@@ -34,11 +34,6 @@ namespace SwaySettings {
 
         [GtkChild]
         private unowned Gtk.Image device_image;
-        [GtkChild]
-        private unowned Gtk.Label device_name;
-
-        [GtkChild]
-        private unowned Gtk.Label status_label;
 
         [GtkChild]
         private unowned Gtk.Spinner status_spinner;
@@ -178,8 +173,6 @@ namespace SwaySettings {
         public void set_row_sensitivity (bool value) {
             this.remove_button.set_sensitive (true);
             this.device_image.set_sensitive (value);
-            this.status_label.set_sensitive (value);
-            this.device_name.set_sensitive (value);
             this.connect_button.set_sensitive (value);
         }
 
@@ -195,7 +188,7 @@ namespace SwaySettings {
                 set_visible (true);
             }
 
-            device_name.set_label (device.alias);
+            this.title = device.alias;
 
             const string DEFAULT_ICON = "bluetooth-symbolic";
             string icon = DEFAULT_ICON;
@@ -204,7 +197,6 @@ namespace SwaySettings {
                 icon = DEFAULT_ICON;
             }
             device_image.set_from_icon_name (icon);
-            device_image.pixel_size = 48;
         }
 
         private void update_state () {
@@ -220,7 +212,7 @@ namespace SwaySettings {
         }
 
         private void set_row_state (State state) {
-            status_label.label = state.get_status ();
+            this.subtitle = state.get_status ();
 
             switch (state) {
                 case State.ERROR:

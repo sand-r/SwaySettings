@@ -36,6 +36,7 @@ executable(
     dep_libpulse_mainloop_glib,
     dep_glycin,
     dep_glycin_gtk4,
+    dep_libcanberra,
   ]
   + shared_deps,
   install: true,

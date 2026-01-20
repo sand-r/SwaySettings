@@ -52,7 +52,13 @@ namespace SwaySettings {
         unowned Gtk.Label graphics_label;
 
         [GtkChild]
+        unowned Adw.PreferencesGroup storage_group;
+        [GtkChild]
         unowned Gtk.ListBox storage_list_box;
+        [GtkChild]
+        unowned Adw.PreferencesGroup external_storage_group;
+        [GtkChild]
+        unowned Gtk.ListBox external_storage_list_box;
 
         construct {
             storage_list_box.set_sort_func ((r1, r2) => {
@@ -67,22 +73,10 @@ namespace SwaySettings {
                 return row1.sorting_priority < row2.sorting_priority? -1: 1;
             });
 
-            storage_list_box.set_header_func ((r, before) => {
-                StorageRow row = (StorageRow)r;
-                StorageRow before_row = (StorageRow)before;
-
-                if (before == null || before_row.removable != row.removable) {
-                    Gtk.Label header = new Gtk.Label (row.removable ?
-                                                      "External Storage":
-                                                      "Storage");
-                    header.set_xalign (0.0f);
-                    header.add_css_class ("title-2");
-                    header.margin_top = 12;
-                    header.margin_bottom = 12;
-                    row.set_header (header);
-                } else {
-                    row.set_header (null);
-                }
+            external_storage_list_box.set_sort_func ((r1, r2) => {
+                StorageRow row1 = (StorageRow)r1;
+                StorageRow row2 = (StorageRow)r2;
+                return row1.drive_name < row2.drive_name? -1 : 1;
             });
 
             get_os_info ();
@@ -108,31 +102,28 @@ namespace SwaySettings {
             if (version != null) {
                 this.version = version;
             }
-            os_version_label.set_markup ("<b>Version</b>  %s".printf (
-                                             this.version));
+            os_version_label.set_text (this.version);
 
             // Kernel version
             var utsname = Posix.utsname ();
             kernel_version = "%s %s".printf (utsname.sysname,
                                              clean_name (utsname.release));
-            kernel_label.set_markup ("<b>Kernel</b>  %s".printf (
-                                         this.kernel_version));
+            kernel_label.set_text (this.kernel_version);
 
             // CPU
             string ?cpu_info = get_cpu_string ();
             if (cpu_info != null) {
                 this.cpu_info = cpu_info;
             }
-            cpu_label.set_markup ("<b>CPU</b>  %s".printf (this.cpu_info));
+            cpu_label.set_text (this.cpu_info);
 
             // Memory
             this.memory = get_mem_string ();
-            mem_label.set_markup ("<b>Memory</b>  %s".printf (this.memory));
+            mem_label.set_text (this.memory);
 
             // GPU
             get_gpu_info.begin (() => {
-                graphics_label.set_markup (
-                    "<b>Graphics</b>  %s".printf (this.graphics));
+                graphics_label.set_text (this.graphics);
             });
 
             get_storage_devices.begin ();
@@ -209,6 +200,9 @@ namespace SwaySettings {
                 return;
             }
 
+            bool has_internal = false;
+            bool has_external = false;
+
             List<DBusObject> objects = client.object_manager.get_objects ();
             foreach (unowned var obj in objects) {
                 var object = ((UDisks.Object)obj);
@@ -253,8 +247,18 @@ namespace SwaySettings {
                     continue;
                 }
 
-                storage_list_box.append (new StorageRow (client, object));
+                var row = new StorageRow (client, object);
+                if (row.removable) {
+                    external_storage_list_box.append (row);
+                    has_external = true;
+                } else {
+                    storage_list_box.append (row);
+                    has_internal = true;
+                }
             }
+
+            storage_group.visible = has_internal;
+            external_storage_group.visible = has_external;
         }
 
         // Thanks Elementary OS:

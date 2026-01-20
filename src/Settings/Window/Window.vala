@@ -100,33 +100,29 @@ namespace SwaySettings {
 
 
         // TODO:
-        // - Change icons
         // - Add Power, Networking, WiFi
         private static SettingsCategory[] items = {
             SettingsCategory ("User", {
-                SettingsItem ("system-users-symbolic", PageType.USERS),
+                SettingsItem ("org.gnome.Settings-users-symbolic", PageType.USERS),
             }),
             SettingsCategory ("Hardware", {
-                SettingsItem ("computer-symbolic", PageType.ABOUT_PC),
-                SettingsItem ("bluetooth-symbolic", PageType.BLUETOOTH),
-                SettingsItem ("audio-speakers-symbolic", PageType.SOUND),
-                SettingsItem ("power-page-symbolic", PageType.POWER),
+                SettingsItem ("org.gnome.Settings-about-symbolic", PageType.ABOUT_PC),
+                SettingsItem ("org.gnome.Settings-bluetooth-symbolic", PageType.BLUETOOTH),
+                SettingsItem ("org.gnome.Settings-sound-symbolic", PageType.SOUND),
+                SettingsItem ("org.gnome.Settings-power-symbolic", PageType.POWER),
             }),
             SettingsCategory ("Customization", {
-                SettingsItem ("preferences-desktop-wallpaper-symbolic",
-                              PageType.WALLPAPER),
-                SettingsItem ("applications-graphics-symbolic",
-                              PageType.APPEARANCE),
-                SettingsItem ("application-x-executable-symbolic",
-                              PageType.STARTUP_APPS),
-                SettingsItem ("preferences-other", PageType.DEFAULT_APPS),
-                SettingsItem ("screenshooter-symbolic", PageType.SCREENSHOT),
+                SettingsItem ("preferences-desktop-wallpaper", PageType.WALLPAPER),
+                SettingsItem ("org.gnome.Settings-appearance-symbolic", PageType.APPEARANCE),
+                SettingsItem ("system-run-symbolic", PageType.STARTUP_APPS),
+                SettingsItem ("org.gnome.Settings-applications-symbolic", PageType.DEFAULT_APPS),
+                SettingsItem ("camera-photo-symbolic", PageType.SCREENSHOT),
                 // SettingsItem ("mail-unread", PageType.SWAYNC, "swaync", !Functions.is_swaync_installed ()),
             }),
             SettingsCategory ("Input", {
-                SettingsItem ("preferences-desktop-keyboard-symbolic",
-                              PageType.KEYBOARD, !ipc.inited),
-                SettingsItem ("input-mouse-symbolic", PageType.MOUSE,
+                SettingsItem ("org.gnome.Settings-keyboard-symbolic", PageType.KEYBOARD,
+                              !ipc.inited),
+                SettingsItem ("org.gnome.Settings-mouse-symbolic", PageType.MOUSE,
                               !ipc.inited),
                 SettingsItem ("input-touchpad-symbolic", PageType.TRACKPAD,
                               !ipc.inited),
@@ -134,10 +130,16 @@ namespace SwaySettings {
         };
 
         construct {
-            default_width = 800;
-            default_height = 576;
+            default_width = self_settings.get_int ("window-width");
+            default_height = self_settings.get_int ("window-height");
             width_request = 500;
             height_request = 300;
+
+            close_request.connect (() => {
+                self_settings.set_int ("window-width", get_width ());
+                self_settings.set_int ("window-height", get_height ());
+                return false;
+            });
 
             split_view.set_show_content (true);
             set_content (split_view);
@@ -152,6 +154,8 @@ namespace SwaySettings {
 
             // Sidebar
             sidebar_listbox.add_css_class ("navigation-sidebar");
+            sidebar_listbox.set_hexpand (true);
+            sidebar_listbox.set_vexpand (true);
             sidebar_listbox.set_activate_on_single_click (true);
             sidebar_listbox.set_selection_mode (Gtk.SelectionMode.SINGLE);
             sidebar_listbox.row_activated.connect ((row) => {
@@ -184,12 +188,13 @@ namespace SwaySettings {
                 if (row_item.group != before_item.group) {
                     Gtk.Separator separator =
                         new Gtk.Separator (Gtk.Orientation.HORIZONTAL);
-                    separator.margin_start = ISidebarListItem.MARGIN;
-                    separator.margin_end = ISidebarListItem.MARGIN;
+                    separator.margin_start = ISidebarListItem.MARGIN_X;
+                    separator.margin_end = ISidebarListItem.MARGIN_X;
                     row.set_header (separator);
                 }
             });
             Gtk.ScrolledWindow scrolled_window = new Gtk.ScrolledWindow ();
+            scrolled_window.set_policy (Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
             scrolled_window.set_child (sidebar_listbox);
             Adw.ToolbarView toolbarview = new Adw.ToolbarView ();
             toolbarview.set_content (scrolled_window);

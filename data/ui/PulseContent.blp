@@ -9,39 +9,65 @@ template $SwaySettingsPulseContent: Adw.Bin {
       name: "pulse_page";
 
       child: Box pulse_page {
-        spacing: 12;
+        spacing: 24;
         orientation: vertical;
+        valign: start;
 
         Adw.PreferencesGroup output_group {
-          title: 'Output Device';
+          title: 'Output';
+
+          header-suffix: MenuButton test_button {
+            label: 'Test...';
+            valign: center;
+
+            styles [
+              "flat"
+            ]
+
+            popover: Popover {
+              child: Box {
+                spacing: 8;
+                margin-top: 6;
+                margin-bottom: 6;
+                margin-start: 6;
+                margin-end: 6;
+
+                Button test_left_button {
+                  label: 'Left';
+                  valign: center;
+                }
+
+                Button test_right_button {
+                  label: 'Right';
+                  valign: center;
+                }
+              };
+            };
+          };
+
+          Adw.ComboRow output_device_row {
+            title: 'Output Device';
+          }
+
+          Adw.ComboRow output_profile_row {
+            title: 'Configuration';
+          }
 
           Adw.ActionRow {
-            title: 'Device';
+            title: 'Output Volume';
 
-            ComboBox output_combo_box {
+            [suffix]
+            Box {
+              spacing: 8;
               valign: center;
-              hexpand: true;
-            }
-          }
 
-          Adw.ActionRow output_profile_row {
-            title: 'Configuration';
+              ToggleButton output_mute_toggle {
+                icon-name: 'audio-volume-high-symbolic';
+                valign: center;
 
-            ComboBox profile_combo_box {
-              valign: center;
-              hexpand: true;
-            }
-          }
-
-          Adw.PreferencesRow {
-            child: Box {
-              margin-top: 8;
-              margin-bottom: 8;
-              margin-start: 8;
-              margin-end: 8;
-
-              Label output_value {
-                width-chars: 3;
+                styles [
+                  "flat"
+                ]
               }
 
               Scale output_slider {
@@ -55,42 +81,52 @@ template $SwaySettingsPulseContent: Adw.Bin {
 
                 digits: 0;
                 hexpand: true;
-
-                styles [
-                  "pulse-scale"
-                ]
               }
+            }
+          }
 
-              ToggleButton output_mute_toggle {
-                halign: center;
-                icon-name: 'audio-volume-high-symbolic';
-                valign: center;
-              }
-            };
+          Adw.ActionRow output_balance_row {
+            title: 'Balance';
+
+            [suffix]
+            Scale output_balance_slider {
+              adjustment: Adjustment output_balance_adjustment {
+                page-increment: 0.1;
+                step-increment: 0.01;
+                value: 0;
+                lower: -1.0;
+                upper: 1.0;
+              };
+
+              digits: 2;
+              draw-value: false;
+              hexpand: true;
+            }
           }
         }
 
         Adw.PreferencesGroup input_group {
-          title: 'Input Device';
+          title: 'Input';
 
-          Adw.ActionRow {
-            title: 'Device';
-
-            ComboBox input_combo_box {
-              valign: center;
-              hexpand: true;
-            }
+          Adw.ComboRow input_device_row {
+            title: 'Input Device';
           }
 
-          Adw.PreferencesRow {
-            Box {
-              margin-top: 8;
-              margin-bottom: 8;
-              margin-start: 8;
-              margin-end: 8;
+          Adw.ActionRow {
+            title: 'Input Volume';
 
-              Label input_value {
-                width-chars: 3;
+            [suffix]
+            Box {
+              spacing: 8;
+              valign: center;
+
+              ToggleButton input_mute_toggle {
+                icon-name: 'audio-input-microphone-symbolic';
+                valign: center;
+
+                styles [
+                  "flat"
+                ]
               }
 
               Scale input_slider {
@@ -102,43 +138,29 @@ template $SwaySettingsPulseContent: Adw.Bin {
 
                 digits: 0;
                 hexpand: true;
-
-                styles [
-                  "pulse-scale"
-                ]
-              }
-
-              ToggleButton input_mute_toggle {
-                halign: center;
-                icon-name: 'audio-volume-high-symbolic';
-                valign: center;
               }
             }
           }
         }
 
         Adw.PreferencesGroup sink_inputs_group {
-          title: 'Volume Levels';
+          title: 'Applications';
 
           ListBox levels_listbox {
+            selection-mode: none;
+
             styles [
-              "content"
+              "boxed-list"
             ]
 
             [placeholder]
-            Box {
-              sensitive: false;
-              orientation: vertical;
-              spacing: 12;
+            Adw.StatusPage {
+              icon-name: 'audio-speakers-symbolic';
+              title: 'No Applications Playing';
 
-              Image {
-                icon-name: 'application-x-executable-symbolic';
-                pixel-size: 72;
-              }
-
-              Label {
-                label: 'Nothing playing';
-              }
+              styles [
+                "compact"
+              ]
             }
           }
         }
@@ -148,23 +170,11 @@ template $SwaySettingsPulseContent: Adw.Bin {
     StackPage {
       name: "error_page";
 
-      child: Box error_page {
+      child: Adw.StatusPage error_page {
+        icon-name: 'audio-volume-muted-symbolic';
+        title: 'Sound Unavailable';
+        description: 'PulseAudio service is not running';
         vexpand: true;
-        hexpand: true;
-        valign: center;
-        halign: center;
-        sensitive: false;
-        orientation: vertical;
-        spacing: 16;
-
-        Image {
-          icon-name: 'audio-volume-muted';
-          pixel-size: 128;
-        }
-
-        Label {
-          label: 'PulseAudio is disabled';
-        }
       };
     }
   };

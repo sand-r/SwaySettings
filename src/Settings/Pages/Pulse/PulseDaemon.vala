@@ -285,6 +285,8 @@ namespace SwaySettings {
 
             PulseDevice[] ports = {};
             foreach (var port in info.ports) {
+                // Skip ports that are definitely not available
+                // (YES = available, UNKNOWN = no jack detection, NO = definitely unavailable)
                 if (port->available == PortAvailable.NO) continue;
 
                 bool is_input = port->direction == Direction.INPUT;
@@ -311,6 +313,7 @@ namespace SwaySettings {
                 device.port_name = port.name;
                 device.port_description = port.description;
                 device.port_id = port->proplist.gets ("card.profile.port");
+                device.port_available = port->available;
 
                 // Get port profiles2 (profiles is "Superseded by profiles2")
                 // and sort largest priority first
@@ -347,6 +350,7 @@ namespace SwaySettings {
                 if (!has_device || device_is_removed) {
                     this.new_device (device);
                 }
+                this.change_device (device);
             }
 
             /** Removes ports that are no longer available */
@@ -369,7 +373,7 @@ namespace SwaySettings {
                     if (!found) {
                         iter.unset ();
                         remove_device (device);
-                        break;
+                        // Don't break - continue checking other devices
                     }
                 }
             }
@@ -426,6 +430,10 @@ namespace SwaySettings {
             // If not found, it's a cardless device
             if (found) return;
 
+            // If this sink has a card but we didn't find a matching device,
+            // the port was filtered out (unavailable) - skip it
+            if (info.card != PulseAudio.INVALID_INDEX) return;
+
             HashMap<string, PulseDevice> devices = this.sinks;
             string id = PulseDevice.get_hash_map_key (
                 info.index.to_string (), info.description);
@@ -450,7 +458,8 @@ namespace SwaySettings {
 
             device.is_virtual = info.proplist.gets ("node.virtual") == "true";
 
-            device.icon_name = "application-x-executable-symbolic";
+            device.icon_name = info.proplist.gets ("device.icon_name")
+                               ?? "audio-speakers-symbolic";
 
             device.cvolume = info.volume;
             device.channel_map = info.channel_map;
@@ -533,6 +542,10 @@ namespace SwaySettings {
             // If not found, it's a cardless device
             if (found) return;
 
+            // If this source has a card but we didn't find a matching device,
+            // the port was filtered out (unavailable) - skip it
+            if (info.card != PulseAudio.INVALID_INDEX) return;
+
             HashMap<string, PulseDevice> devices = this.sources;
             string id = PulseDevice.get_hash_map_key (
                 info.index.to_string (), info.description);
@@ -557,7 +570,8 @@ namespace SwaySettings {
 
             device.is_virtual = info.proplist.gets ("node.virtual") == "true";
 
-            device.icon_name = "application-x-executable-symbolic";
+            device.icon_name = info.proplist.gets ("device.icon_name")
+                               ?? "audio-input-microphone-symbolic";
 
             device.cvolume = info.volume;
             device.channel_map = info.channel_map;
@@ -635,6 +649,35 @@ namespace SwaySettings {
             }
         }
 
+        public void set_device_balance (PulseDevice device, double balance) {
+            if (device == null || device.direction != Direction.OUTPUT) {
+                return;
+            }
+            if (!device.channel_map.can_balance ()) {
+                return;
+            }
+            if (device.device_name == null) {
+                return;
+            }
+
+            device.volume_operations.foreach ((operation) => {
+                if (operation.get_state () == Operation.State.RUNNING) {
+                    operation.cancel ();
+                }
+
+                device.volume_operations.remove (operation);
+                return GLib.Source.CONTINUE;
+            });
+
+            var cvol = device.cvolume;
+            cvol.set_balance (device.channel_map, (float) balance);
+            Operation ? operation = context.set_sink_volume_by_name (
+                device.device_name, cvol);
+            if (operation != null) {
+                device.volume_operations.add (operation);
+            }
+        }
+
         public async void set_default_device (PulseDevice device) {
             if (device == null) return;
             bool is_input = device.direction == Direction.INPUT;
@@ -676,7 +719,7 @@ namespace SwaySettings {
             }
 
             if (is_input) {
-                if (device.device_name != default_sink_name) {
+                if (device.device_name != default_source_name) {
                     debug ("Setting default source to: %s", device.device_name);
                     yield set_default_source (device);
                 }

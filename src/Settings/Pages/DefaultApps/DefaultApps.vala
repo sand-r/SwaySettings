@@ -3,16 +3,22 @@ using Gee;
 namespace SwaySettings {
     public class DefaultApps : PageScroll {
 
-        public static DefaultAppData[] mime_types = {
-            DefaultAppData ("Web Browser", "x-scheme-handler/http",
-                              { "text/html", "application/xhtml+xml", "x-scheme-handler/https" }),
-            DefaultAppData ("Mail Client", "x-scheme-handler/mailto"),
-            DefaultAppData ("Calendar", "text/calendar"),
-            DefaultAppData ("Music", "audio/x-vorbis+ogg", { "audio/*" }),
-            DefaultAppData ("Video", "video/x-ogm+ogg", { "video/*" }),
-            DefaultAppData ("Photos", "image/jpeg", { "image/*" }),
-            DefaultAppData ("Text Editor", "text/plain"),
-            DefaultAppData ("File Browser", "inode/directory"),
+        public static DefaultAppGroup[] app_groups = {
+            DefaultAppGroup ("Internet", {
+                DefaultAppData ("Web Browser", "x-scheme-handler/http",
+                                  { "text/html", "application/xhtml+xml", "x-scheme-handler/https" }),
+                DefaultAppData ("Mail Client", "x-scheme-handler/mailto"),
+                DefaultAppData ("Calendar", "text/calendar"),
+            }),
+            DefaultAppGroup ("Media", {
+                DefaultAppData ("Music", "audio/x-vorbis+ogg", { "audio/*" }),
+                DefaultAppData ("Video", "video/x-ogm+ogg", { "video/*" }),
+                DefaultAppData ("Photos", "image/jpeg", { "image/*" }),
+            }),
+            DefaultAppGroup ("System", {
+                DefaultAppData ("Text Editor", "text/plain"),
+                DefaultAppData ("File Browser", "inode/directory"),
+            }),
         };
 
         public DefaultApps (SettingsItem item, Adw.NavigationPage page) {
@@ -20,24 +26,29 @@ namespace SwaySettings {
         }
 
         public override Gtk.Widget set_child () {
-            var list_box = new Gtk.ListBox () {
-                selection_mode = Gtk.SelectionMode.NONE,
-                vexpand = false,
-                valign = Gtk.Align.START,
-            };
-            list_box.add_css_class ("content");
-            for (int i = 0; i < mime_types.length; i++) {
-                list_box.append (get_item (mime_types[i]));
+            var box = new Gtk.Box (Gtk.Orientation.VERTICAL, 24);
+            box.valign = Gtk.Align.START;
+
+            foreach (var group in app_groups) {
+                var pref_group = new Adw.PreferencesGroup ();
+                pref_group.title = group.name;
+
+                foreach (var app_data in group.items) {
+                    pref_group.add (get_item (app_data));
+                }
+
+                box.append (pref_group);
             }
-            return list_box;
+
+            return box;
         }
 
-        Gtk.Widget get_item (DefaultAppData def_app) {
+        Adw.ActionRow get_item (DefaultAppData def_app) {
+            var row = new Adw.ActionRow ();
+            row.title = def_app.category_name;
+
             var chooser = new Gtk.AppChooserButton (def_app.mime_type) {
-                vexpand = false,
-                hexpand = false,
                 valign = Gtk.Align.CENTER,
-                halign = Gtk.Align.END,
             };
             chooser.show_dialog_item = true;
             chooser.show_default_item = true;
@@ -46,7 +57,11 @@ namespace SwaySettings {
                 if (selected_app == null) return;
                 set_default_app (def_app, selected_app);
             });
-            return new ListItem (def_app.category_name, chooser);
+
+            row.add_suffix (chooser);
+            row.activatable_widget = chooser;
+
+            return row;
         }
 
         void set_default_app (DefaultAppData def_data, AppInfo selected_app) {
@@ -80,6 +95,16 @@ namespace SwaySettings {
                 stderr.printf ("Error! Could not set %s as default app!\n",
                                selected_app.get_name ());
             }
+        }
+    }
+
+    public struct DefaultAppGroup {
+        string name;
+        DefaultAppData[] items;
+
+        DefaultAppGroup (string name, DefaultAppData[] items) {
+            this.name = name;
+            this.items = items;
         }
     }
 

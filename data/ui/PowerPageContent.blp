@@ -12,24 +12,11 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
     StackPage {
       name: "placeholder";
 
-      child: Box {
-        halign: center;
-        valign: center;
-        hexpand: true;
+      child: Adw.StatusPage {
+        icon-name: "battery-symbolic";
+        title: "No Power Information";
+        description: "Power management daemon is not available";
         vexpand: true;
-        orientation: vertical;
-        spacing: 12;
-        sensitive: false;
-
-        Image {
-          pixel-size: 96;
-          icon-name: "power-page-symbolic";
-          use-fallback: true;
-        }
-
-        Label text_empty_label {
-          label: "No Power Daemon Running";
-        }
       };
     }
 
@@ -38,37 +25,46 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
 
       child: Gtk.Box main_box {
         orientation: vertical;
-        spacing: 32;
+        spacing: 24;
         halign: fill;
+        valign: start;
 
-        Box battery_group {
+        Adw.PreferencesGroup battery_group {
           visible: false;
-          orientation: vertical;
-          margin-top: 32;
-          spacing: 8;
+          title: "Battery";
 
-          Box {
-            orientation: horizontal;
-            spacing: 4;
+          Adw.ActionRow battery_status_row {
+            title: "Battery Level";
+            selectable: false;
+            activatable: false;
 
+            [prefix]
             Image battery_group_icon {
               pixel-size: 32;
+              valign: center;
             }
 
-            Label battery_group_percent {
-              xalign: 0;
+            [suffix]
+            Box {
+              orientation: horizontal;
+              spacing: 12;
+              valign: center;
 
-              styles [
-                "title-1",
-              ]
+              ProgressBar battery_group_progress {
+                valign: center;
+                hexpand: true;
+                width-request: 140;
+              }
+
+              Label battery_group_percent {
+                valign: center;
+
+                styles [
+                  "dim-label"
+                ]
+              }
             }
           }
-
-          Label battery_group_status {
-            xalign: 0;
-          }
-
-          ProgressBar battery_group_progress {}
         }
 
         Adw.PreferencesGroup battery_history_row {
@@ -104,24 +100,39 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
           Adw.ActionRow {
             title: "Health";
 
+            [suffix]
             Label health_status_label {
-              xalign: 0;
+              valign: center;
+
+              styles [
+                "dim-label"
+              ]
             }
           }
 
           Adw.ActionRow {
             title: "Maximum Capacity";
 
+            [suffix]
             Label health_capacity_label {
-              xalign: 0;
+              valign: center;
+
+              styles [
+                "dim-label"
+              ]
             }
           }
 
           Adw.ActionRow health_cycles_row {
             title: "Cycle Count";
 
+            [suffix]
             Label health_cycles_label {
-              xalign: 0;
+              valign: center;
+
+              styles [
+                "dim-label"
+              ]
             }
           }
 

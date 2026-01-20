@@ -21,24 +21,10 @@ namespace SwaySettings {
 
     [GtkTemplate (ui = "/org/erikreider/swaysettings/ui/PulseContent.ui")]
     private class PulseContent : Adw.Bin {
-        private enum DeviceColumns {
-            COLUMN_KEY,
-            COLUMN_DEVICE,
-            COLUMN_ICON,
-            COLUMN_NAME,
-            N_COLUMNS
-        }
-
-        private enum ProfileColumns {
-            COLUMN_KEY,
-            COLUMN_DEVICE,
-            COLUMN_PROFILE,
-            COLUMN_NAME,
-            N_COLUMNS
-        }
-
-        public const string TOGGLE_ICON_MUTED = "audio-volume-muted-symbolic";
-        public const string TOGGLE_ICON_UNMUTED = "audio-volume-high-symbolic";
+        public const string OUTPUT_ICON_MUTED = "audio-volume-muted-symbolic";
+        public const string OUTPUT_ICON_UNMUTED = "audio-volume-high-symbolic";
+        public const string INPUT_ICON_MUTED = "audio-input-microphone-muted-symbolic";
+        public const string INPUT_ICON_UNMUTED = "audio-input-microphone-symbolic";
 
         [GtkChild]
         unowned Gtk.Stack stack;
@@ -46,40 +32,38 @@ namespace SwaySettings {
         [GtkChild]
         unowned Gtk.Box pulse_page;
         [GtkChild]
-        unowned Gtk.Box error_page;
+        unowned Adw.StatusPage error_page;
 
         // Sink
         [GtkChild]
         unowned Adw.PreferencesGroup output_group;
         [GtkChild]
-        unowned Gtk.Label output_value;
+        unowned Adw.ActionRow output_balance_row;
         [GtkChild]
         unowned Gtk.Scale output_slider;
         [GtkChild]
+        unowned Gtk.Scale output_balance_slider;
+        [GtkChild]
         unowned Gtk.ToggleButton output_mute_toggle;
         [GtkChild]
-        unowned Gtk.ComboBox output_combo_box;
-        Gtk.ListStore sink_list_store;
+        unowned Adw.ComboRow output_device_row;
+        GLib.ListStore sink_list_store;
 
         // Bluetooth Profile ComboBox
         [GtkChild]
-        unowned Adw.ActionRow output_profile_row;
-        [GtkChild]
-        unowned Gtk.ComboBox profile_combo_box;
-        Gtk.ListStore profile_list_store;
+        unowned Adw.ComboRow output_profile_row;
+        GLib.ListStore profile_list_store;
 
         // Source
         [GtkChild]
         unowned Adw.PreferencesGroup input_group;
         [GtkChild]
-        unowned Gtk.Label input_value;
-        [GtkChild]
         unowned Gtk.Scale input_slider;
         [GtkChild]
         unowned Gtk.ToggleButton input_mute_toggle;
         [GtkChild]
-        unowned Gtk.ComboBox input_combo_box;
-        Gtk.ListStore source_list_store;
+        unowned Adw.ComboRow input_device_row;
+        GLib.ListStore source_list_store;
 
         // Sink inputs
         [GtkChild]
@@ -87,10 +71,24 @@ namespace SwaySettings {
         [GtkChild]
         public unowned Adw.PreferencesGroup sink_inputs_group;
 
+        // Speaker test
+        [GtkChild]
+        unowned Gtk.MenuButton test_button;
+        [GtkChild]
+        unowned Gtk.Button test_left_button;
+        [GtkChild]
+        unowned Gtk.Button test_right_button;
+
         private PulseDevice ? default_sink = null;
         private PulseDevice ? default_source = null;
+        private bool updating_balance = false;
+        private bool updating_output_selection = false;
+        private bool updating_input_selection = false;
+        private bool updating_profile_selection = false;
 
         private PulseDaemon client = new PulseDaemon ();
+
+        private Canberra.Context? canberra_context = null;
 
         construct {
             this.client.change_device.connect (device_change);
@@ -103,20 +101,15 @@ namespace SwaySettings {
 
             this.client.change_default_device.connect (default_device_changed);
 
-            this.client.bind_property ("running", stack, "visible-child",
-                                       BindingFlags.SYNC_CREATE,
-                                       (bind, from_value, ref to_value) => {
-                to_value = error_page;
-                if (!from_value.holds (Type.BOOLEAN)) return false;
-                if (!from_value.get_boolean ()) return true;
-                to_value = pulse_page;
-                return true;
+            stack.set_visible_child_name (client.running ? "pulse_page" : "error_page");
+            this.client.notify["running"].connect (() => {
+                stack.set_visible_child_name (client.running ? "pulse_page" : "error_page");
             });
 
-            stack.set_visible_child (client.running ? pulse_page : error_page);
-            this.client.notify["running"].connect (() => {
-                stack.set_visible_child ((client.running ? pulse_page : error_page));
-            });
+            // Initialize canberra for speaker testing
+            init_canberra ();
+            test_left_button.clicked.connect (() => play_test_sound ("front-left"));
+            test_right_button.clicked.connect (() => play_test_sound ("front-right"));
 
             // UI signals
             output_mute_toggle.bind_property ("active",
@@ -132,18 +125,33 @@ namespace SwaySettings {
                 this.client.set_device_mute (b.active, default_source);
             });
 
-            output_combo_box.changed.connect (combo_box_changed);
-            profile_combo_box.changed.connect (profile_combo_box_changed);
-            input_combo_box.changed.connect (combo_box_changed);
+            output_device_row.notify["selected-item"].connect (() => {
+                device_row_changed.begin (output_device_row, false);
+            });
+            output_profile_row.notify["selected-item"].connect (() => {
+                profile_row_changed.begin ();
+            });
+            input_device_row.notify["selected-item"].connect (() => {
+                device_row_changed.begin (input_device_row, true);
+            });
 
             output_slider.value_changed.connect (() => {
-                output_value.label = "%.0lf".printf(Math.round (output_slider.get_value ()));
                 this.client.set_device_volume (
                     default_sink,
                     (float) output_slider.get_value ());
             });
+            output_balance_slider.value_changed.connect (() => {
+                if (updating_balance) {
+                    return;
+                }
+                if (default_sink == null
+                    || !default_sink.channel_map.can_balance ()) {
+                    return;
+                }
+                this.client.set_device_balance (default_sink,
+                                                output_balance_slider.get_value ());
+            });
             input_slider.value_changed.connect (() => {
-                input_value.label = "%.0lf".printf(Math.round (input_slider.get_value ()));
                 this.client.set_device_volume (
                     default_source,
                     (float) input_slider.get_value ());
@@ -152,77 +160,41 @@ namespace SwaySettings {
             output_group.set_sensitive (false);
             input_group.set_sensitive (false);
             sink_inputs_group.set_sensitive (false);
+            output_balance_row.set_visible (false);
+            output_profile_row.set_visible (false);
         }
 
         public PulseContent () {
-            var cell_render_icon = new Gtk.CellRendererPixbuf ();
-            cell_render_icon.set_padding (8, 0);
-            var cell_render_text = new Gtk.CellRendererText ();
-            cell_render_text.ellipsize = Pango.EllipsizeMode.END;
-
             // Sinks
-            sink_list_store = new Gtk.ListStore (
-                DeviceColumns.N_COLUMNS,
-                typeof (string), typeof (unowned PulseDevice),
-                typeof (string), typeof (string));
-            sink_list_store.set_sort_column_id (
-                DeviceColumns.COLUMN_KEY, Gtk.SortType.ASCENDING);
+            sink_list_store = new GLib.ListStore (typeof (PulseDevice));
 
             foreach (var item in this.client.sinks.values) {
                 device_added (item);
             }
-            output_combo_box.set_model (sink_list_store);
-            output_combo_box.pack_start (cell_render_icon, false);
-            output_combo_box.add_attribute (cell_render_icon,
-                                            "icon-name", DeviceColumns.COLUMN_ICON);
-            output_combo_box.pack_start (cell_render_text, true);
-            output_combo_box.add_attribute (cell_render_text,
-                                            "text", DeviceColumns.COLUMN_NAME);
+            output_device_row.set_model (sink_list_store);
+            output_device_row.set_factory (create_device_factory ());
+            output_device_row.set_list_factory (create_device_factory ());
 
             // Sink Bluetooth Profiles
-            profile_list_store = new Gtk.ListStore (
-                ProfileColumns.N_COLUMNS,
-                typeof (string), // Key
-                typeof (PulseDevice), // Device
-                typeof (PulseCardProfile), // Profile
-                typeof (string)); // Name
-            profile_list_store.set_sort_column_id (
-                ProfileColumns.COLUMN_KEY, Gtk.SortType.ASCENDING);
-
-            profile_combo_box.set_model (profile_list_store);
-            profile_combo_box.pack_start (cell_render_text, true);
-            profile_combo_box.add_attribute (cell_render_text,
-                                             "text", ProfileColumns.COLUMN_NAME);
-
-            // Sink slider and mute toggle button
-            output_slider.add_mark (25, Gtk.PositionType.LEFT, null);
-            output_slider.add_mark (50, Gtk.PositionType.TOP, null);
-            output_slider.add_mark (75, Gtk.PositionType.TOP, null);
+            profile_list_store = new GLib.ListStore (typeof (PulseCardProfile));
+            output_profile_row.set_model (profile_list_store);
+            Gtk.PropertyExpression profile_expression =
+                new Gtk.PropertyExpression (typeof (PulseCardProfile),
+                                            null,
+                                            "description");
+            output_profile_row.set_expression (profile_expression);
 
             output_mute_toggle.toggled.connect (mute_toggle_cb);
 
             // Sources
-            source_list_store = new Gtk.ListStore (
-                DeviceColumns.N_COLUMNS,
-                typeof (string), typeof (unowned PulseDevice),
-                typeof (string), typeof (string));
-            source_list_store.set_sort_column_id (
-                DeviceColumns.COLUMN_KEY, Gtk.SortType.ASCENDING);
+            source_list_store = new GLib.ListStore (typeof (PulseDevice));
 
             foreach (var item in this.client.sources.values) {
                 device_added (item);
             }
-            input_combo_box.set_model (source_list_store);
-            input_combo_box.pack_start (cell_render_icon, false);
-            input_combo_box.add_attribute (cell_render_icon,
-                                           "icon-name", DeviceColumns.COLUMN_ICON);
-            input_combo_box.pack_start (cell_render_text, true);
-            input_combo_box.add_attribute (cell_render_text,
-                                           "text", DeviceColumns.COLUMN_NAME);
-
-            input_slider.add_mark (25, Gtk.PositionType.TOP, null);
-            input_slider.add_mark (50, Gtk.PositionType.TOP, null);
-            input_slider.add_mark (75, Gtk.PositionType.TOP, null);
+            input_device_row.set_model (source_list_store);
+            input_device_row.set_factory (create_device_factory ());
+            input_device_row.set_list_factory (create_device_factory ());
 
             input_mute_toggle.toggled.connect (mute_toggle_cb);
 
@@ -254,119 +226,148 @@ namespace SwaySettings {
         }
 
         private void mute_toggle_cb (Gtk.ToggleButton button) {
-            string icon = button.active ? TOGGLE_ICON_MUTED : TOGGLE_ICON_UNMUTED;
+            bool is_input = button == input_mute_toggle;
+            string icon = button.active
+                ? (is_input ? INPUT_ICON_MUTED : OUTPUT_ICON_MUTED)
+                : (is_input ? INPUT_ICON_UNMUTED : OUTPUT_ICON_UNMUTED);
             button.set_icon_name (icon);
         }
 
-        private async void combo_box_changed (Gtk.ComboBox combo) {
-            Gtk.ListStore list_store = (Gtk.ListStore) combo.get_model ();
-            PulseDevice ? device = get_selected_device (combo, list_store);
+        private async void device_row_changed (Adw.ComboRow row, bool is_input) {
+            if (is_input ? updating_input_selection : updating_output_selection) {
+                return;
+            }
+            PulseDevice ? device = row.get_selected_item () as PulseDevice;
             if (device == null) return;
-            PulseDevice ? cmp_device = device.direction == PulseAudio.Direction.INPUT ?
-                                       default_source : default_sink;
+            PulseDevice ? cmp_device = is_input ? default_source : default_sink;
 
-            // Check if setting the same device
-            if (cmp_device != null && device.cmp (cmp_device)) return;
+            // Check if setting the same device (compare identity, not state)
+            if (cmp_device != null &&
+                device.get_current_hash_key () == cmp_device.get_current_hash_key ()) return;
 
-            combo.changed.disconnect (combo_box_changed);
             yield this.client.set_default_device (device);
-
-            Gtk.TreeIter iter = find_device_iter (list_store, device);
-            combo.set_active_iter (iter);
-            combo.changed.connect (combo_box_changed);
         }
 
-        private async void profile_combo_box_changed (Gtk.ComboBox combo) {
-            Gtk.ListStore list_store = (Gtk.ListStore) combo.get_model ();
-            PulseCardProfile ? profile = get_selected_device_profile (combo, list_store);
+        private async void profile_row_changed () {
+            if (updating_profile_selection) {
+                return;
+            }
+            PulseCardProfile ? profile = output_profile_row.get_selected_item ()
+                as PulseCardProfile;
             if (profile == null) return;
-            PulseDevice ? device = get_selected_device (output_combo_box,
-                                                        sink_list_store);
+            PulseDevice ? device = output_device_row.get_selected_item ()
+                as PulseDevice;
 
-            // Check if setting the same device
+            // Check if setting the same profile
             if (device != null &&
                 device.active_profile != null &&
                 profile.cmp (device.active_profile)) return;
 
-            combo.changed.disconnect (profile_combo_box_changed);
             yield this.client.set_bluetooth_card_profile (profile, device);
-
-            combo.changed.connect (profile_combo_box_changed);
         }
 
         /*
          * Getters
          */
 
-        private PulseDevice ? get_selected_device (Gtk.ComboBox combo_box,
-                                                   Gtk.ListStore list_store) {
-            Gtk.TreeIter iter;
-            combo_box.get_active_iter (out iter);
-            if (!list_store.iter_is_valid (iter)) return null;
-            Value val;
-            list_store.get_value (iter, DeviceColumns.COLUMN_DEVICE, out val);
-
-            if (!val.holds (Type.OBJECT)) return null;
-            unowned Object obj = val.get_object ();
-            if (!(obj is PulseDevice)) return null;
-            return (PulseDevice) obj;
+        private PulseDevice ? get_selected_device (Adw.ComboRow row) {
+            return row.get_selected_item () as PulseDevice;
         }
 
-        private Gtk.TreeIter ? find_device_iter (Gtk.ListStore list_store,
-                                                 PulseDevice device) {
-            Gtk.TreeIter ? iter = null;
-            list_store.foreach ((model, path, it) => {
-                Value value;
-                model.get_value (it, DeviceColumns.COLUMN_DEVICE, out value);
-                PulseDevice d = (PulseDevice) value;
-                if (d.cmp (device)) {
-                    iter = it;
-                    return true;
+        private uint find_device_position (GLib.ListStore list_store,
+                                           PulseDevice device) {
+            string key = device.get_current_hash_key ();
+            for (uint i = 0; i < list_store.get_n_items (); i++) {
+                PulseDevice ? item = list_store.get_item (i) as PulseDevice;
+                if (item != null && item.get_current_hash_key () == key) {
+                    return i;
                 }
-                return false;
-            });
-            return iter;
+            }
+            return uint.MAX;
         }
 
-        private PulseCardProfile ? get_selected_device_profile (Gtk.ComboBox combo_box,
-                                                                Gtk.ListStore list_store) {
-            Gtk.TreeIter iter;
-            combo_box.get_active_iter (out iter);
-            if (!list_store.iter_is_valid (iter)) return null;
-            Value val;
-            list_store.get_value (iter, ProfileColumns.COLUMN_PROFILE, out val);
+        private bool should_show_device (PulseDevice device) {
+            if (device == null || device.removed) {
+                return false;
+            }
+            // Cardless devices (including virtual sinks/sources) always show
+            if (!device.has_card) {
+                return true;
+            }
+            // Default device always shows
+            if (device.is_default) {
+                return true;
+            }
+            // Devices with cards: hide only if port is definitely unavailable (NO)
+            // UNKNOWN means no jack detection, so show it (benefit of the doubt)
+            return device.port_available != PortAvailable.NO;
+        }
 
-            if (!val.holds (Type.OBJECT)) return null;
-            unowned Object obj = val.get_object ();
-            if (!(obj is PulseCardProfile)) return null;
-            return (PulseCardProfile) obj;
+        private string get_device_icon_name (PulseDevice device) {
+            string icon = device.icon_name ?? "";
+            if (icon == "") {
+                icon = device.direction == Direction.INPUT
+                    ? "audio-input-microphone-symbolic"
+                    : "audio-speakers-symbolic";
+            }
+            if (!icon.has_suffix ("-symbolic")) {
+                icon += "-symbolic";
+            }
+            return icon;
+        }
+
+        private Gtk.SignalListItemFactory create_device_factory () {
+            var factory = new Gtk.SignalListItemFactory ();
+            factory.setup.connect ((list_item) => {
+                var list_item_widget = list_item as Gtk.ListItem;
+                if (list_item_widget == null) return;
+                var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 8);
+                var image = new Gtk.Image ();
+                image.set_pixel_size (16);
+                var label = new Gtk.Label (null);
+                label.set_xalign (0);
+                label.set_hexpand (true);
+                label.set_ellipsize (Pango.EllipsizeMode.END);
+                box.append (image);
+                box.append (label);
+                list_item_widget.set_child (box);
+            });
+            factory.bind.connect ((list_item) => {
+                var list_item_widget = list_item as Gtk.ListItem;
+                if (list_item_widget == null) return;
+                var device = list_item_widget.get_item () as PulseDevice;
+                if (device == null) return;
+                var box = (Gtk.Box) list_item_widget.get_child ();
+                var image = (Gtk.Image) box.get_first_child ();
+                var label = (Gtk.Label) image.get_next_sibling ();
+                image.set_from_icon_name (get_device_icon_name (device));
+                label.set_text (device.get_display_name () ?? "");
+            });
+            return factory;
+        }
+
+        private void update_group_sensitivity (bool is_input, GLib.ListStore list_store) {
+            (is_input ? input_group : output_group).set_sensitive (
+                list_store.get_n_items () > 0);
         }
 
         private void set_device_profiles (PulseDevice device) {
-            profile_combo_box.changed.disconnect (profile_combo_box_changed);
-
-            Gtk.TreeIter ? default_profile = null;
-            profile_list_store.clear ();
+            updating_profile_selection = true;
+            profile_list_store.remove_all ();
+            uint default_profile = 0;
+            uint index = 0;
             foreach (var profile in device.profiles.data) {
-                Gtk.TreeIter iter;
-                profile_list_store.append (out iter);
-                profile_list_store.set (
-                    iter,
-                    ProfileColumns.COLUMN_KEY, profile.name,
-                    ProfileColumns.COLUMN_DEVICE, device,
-                    ProfileColumns.COLUMN_PROFILE, profile,
-                    ProfileColumns.COLUMN_NAME, profile.description,
-                    -1);
+                profile_list_store.append (profile);
 
                 // Check if active profile
                 if (profile.name == device.card_active_profile) {
-                    default_profile = iter;
+                    default_profile = index;
                 }
+                index++;
             }
 
-            profile_combo_box.set_active_iter (default_profile);
-
-            profile_combo_box.changed.connect (profile_combo_box_changed);
+            output_profile_row.set_selected (default_profile);
+            updating_profile_selection = false;
         }
 
         /*
@@ -375,34 +376,61 @@ namespace SwaySettings {
 
         private void device_change (PulseDevice device) {
             bool is_input = device.direction == Direction.INPUT;
-            Gtk.ListStore list_store =
+            GLib.ListStore list_store =
                 is_input ? source_list_store : sink_list_store;
 
-            Gtk.TreeIter ? iter = find_device_iter (list_store, device);
-            if (iter == null) return;
-            list_store.set (iter,
-                            DeviceColumns.COLUMN_KEY, device.get_current_hash_key (),
-                            DeviceColumns.COLUMN_DEVICE, device,
-                            DeviceColumns.COLUMN_ICON, device.icon_name + "-symbolic",
-                            DeviceColumns.COLUMN_NAME, device.get_display_name (),
-                            -1);
+            uint position = find_device_position (list_store, device);
+            if (!should_show_device (device)) {
+                if (position != uint.MAX) {
+                    list_store.remove (position);
+                    update_group_sensitivity (is_input, list_store);
+                }
+                return;
+            }
+
+            if (position == uint.MAX) {
+                // Device not in list, add it
+                list_store.append (device);
+                position = list_store.get_n_items () - 1;
+                update_group_sensitivity (is_input, list_store);
+            }
+            // If device already in list, don't remove/reinsert - properties are already
+            // updated on the same object instance. This avoids triggering selection changes.
 
             // Change UI if device is default device
             unowned PulseDevice ? default_device = is_input
                 ? this.default_source : this.default_sink;
-            if (default_device == null || !device.cmp (default_device)) return;
+            if (default_device == null ||
+                device.get_current_hash_key () != default_device.get_current_hash_key ()) return;
 
-            Gtk.ComboBox combo_box;
             Gtk.ToggleButton toggle;
             Gtk.Scale slider;
+            Adw.ComboRow device_row;
             if (is_input) {
-                combo_box = input_combo_box;
+                device_row = input_device_row;
                 toggle = input_mute_toggle;
                 slider = input_slider;
             } else {
-                combo_box = output_combo_box;
+                device_row = output_device_row;
                 toggle = output_mute_toggle;
                 slider = output_slider;
+            }
+
+            // Only update selection if it actually needs to change
+            PulseDevice? current_selected = device_row.get_selected_item () as PulseDevice;
+            if (current_selected == null ||
+                current_selected.get_current_hash_key () != device.get_current_hash_key ()) {
+                if (is_input) {
+                    updating_input_selection = true;
+                } else {
+                    updating_output_selection = true;
+                }
+                device_row.set_selected (position);
+                if (is_input) {
+                    updating_input_selection = false;
+                } else {
+                    updating_output_selection = false;
+                }
             }
 
             if (device.direction == PulseAudio.Direction.OUTPUT) {
@@ -411,50 +439,51 @@ namespace SwaySettings {
                     set_device_profiles (device);
                 } else {
                     output_profile_row.set_visible (false);
-                    profile_combo_box.changed.disconnect (profile_combo_box_changed);
-                    profile_list_store.clear ();
-                    profile_combo_box.changed.connect (profile_combo_box_changed);
+                    profile_list_store.remove_all ();
                 }
             }
-
-            // Set active in combo_box without calling its changed signal
-            combo_box.changed.disconnect (combo_box_changed);
-            combo_box.set_active_iter (iter);
-            combo_box.changed.connect (combo_box_changed);
             // Set mute state
             toggle.set_active (device.is_muted);
             // Set volume
             slider.set_value (device.volume);
+
+            // Set balance (output only)
+            if (!is_input) {
+                bool can_balance = device.channel_map.can_balance ();
+                output_balance_row.set_visible (can_balance);
+                if (can_balance) {
+                    updating_balance = true;
+                    output_balance_slider.set_value (device.balance);
+                    updating_balance = false;
+                }
+            }
         }
 
         private void device_added (PulseDevice device) {
             bool is_input = device.direction == Direction.INPUT;
-            Gtk.ListStore list_store =
+            GLib.ListStore list_store =
                 is_input ? source_list_store : sink_list_store;
 
-            Gtk.TreeIter iter;
-            list_store.append (out iter);
-            list_store.set (
-                iter,
-                DeviceColumns.COLUMN_KEY, device.get_current_hash_key (),
-                DeviceColumns.COLUMN_DEVICE, device,
-                DeviceColumns.COLUMN_ICON, device.icon_name + "-symbolic",
-                DeviceColumns.COLUMN_NAME, device.get_display_name (),
-                -1);
-            (is_input ? input_group : output_group).set_sensitive (true);
+            if (!should_show_device (device)) {
+                update_group_sensitivity (is_input, list_store);
+                return;
+            }
+
+            if (find_device_position (list_store, device) == uint.MAX) {
+                list_store.append (device);
+            }
+            update_group_sensitivity (is_input, list_store);
         }
 
         private void device_removed (PulseDevice device) {
             bool is_input = device.direction == Direction.INPUT;
-            Gtk.ListStore list_store =
+            GLib.ListStore list_store =
                 is_input ? source_list_store : sink_list_store;
 
-            Gtk.TreeIter ? iter = find_device_iter (list_store, device);
-            if (iter == null) return;
-            list_store.remove (ref iter);
-            if (list_store.iter_n_children (null) == 0) {
-                (is_input ? input_group : output_group).set_sensitive (false);
-            }
+            uint position = find_device_position (list_store, device);
+            if (position == uint.MAX) return;
+            list_store.remove (position);
+            update_group_sensitivity (is_input, list_store);
         }
 
         /*
@@ -519,6 +548,47 @@ namespace SwaySettings {
             });
             if (count == 0) {
                 sink_inputs_group.set_sensitive (false);
+            }
+        }
+
+        /*
+         * Speaker Test (Canberra)
+         */
+
+        private void init_canberra () {
+            int result = Canberra.Context.create (out canberra_context);
+            if (result != Canberra.SUCCESS) {
+                warning ("Failed to create canberra context: %s",
+                         Canberra.strerror (result));
+                test_button.sensitive = false;
+                test_left_button.sensitive = false;
+                test_right_button.sensitive = false;
+                return;
+            }
+
+            canberra_context.change_props (
+                Canberra.PROP_APPLICATION_NAME, "Sway Settings",
+                null);
+        }
+
+        private void play_test_sound (string channel) {
+            if (canberra_context == null) {
+                return;
+            }
+
+            // Cancel any currently playing test sound
+            canberra_context.cancel (1);
+
+            int result = canberra_context.play (
+                1,  // id for cancellation
+                Canberra.PROP_EVENT_ID, "audio-channel-" + channel,
+                Canberra.PROP_EVENT_DESCRIPTION, "Testing %s speaker".printf (channel),
+                Canberra.PROP_CANBERRA_FORCE_CHANNEL, channel,
+                Canberra.PROP_MEDIA_ROLE, "test",
+                null);
+
+            if (result != Canberra.SUCCESS) {
+                warning ("Failed to play test sound: %s", Canberra.strerror (result));
             }
         }
     }

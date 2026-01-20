@@ -212,6 +212,16 @@
   }
 }
 
+.sidebar-item-label {
+  font-weight: 400;
+  font-size: 1em;
+}
+
+.sidebar-item {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 batterygraphwidget {
   padding: 8px;
   color: var(--border-color);

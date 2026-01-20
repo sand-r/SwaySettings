@@ -3,6 +3,7 @@ executable(
   files(
     './pam_helper.c',
     './pam_helper.vala',
+    './fingerprint.vala',
     './Locker.vala',
     './LockerWindow.vala',
   )

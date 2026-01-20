@@ -1,6 +1,6 @@
 namespace Wallpaper {
     class Window : Gtk.Window {
-        const Gsk.ScalingFilter SCALING_FILTER = Gsk.ScalingFilter.NEAREST;
+        const Gsk.ScalingFilter SCALING_FILTER = Gsk.ScalingFilter.TRILINEAR;
         const int TRANSITION_DURATION = 500;
         const int BLUR_RADIUS = 100;
 

@@ -1,44 +1,38 @@
 using Gtk 4.0;
+using Adw 1;
 
-template $SwaySettingsStorageRow: Gtk.ListBoxRow {
+template $SwaySettingsStorageRow: Adw.PreferencesRow {
   selectable: false;
   activatable: false;
-
-  styles [
-    "storage-row"
-  ]
 
   child: Gtk.Box {
     spacing: 12;
     orientation: horizontal;
+    margin-top: 12;
+    margin-bottom: 12;
+    margin-start: 12;
+    margin-end: 12;
 
-    Gtk.Box {
-      orientation: vertical;
-      spacing: 4;
+    Gtk.Image icon {
       valign: center;
-
-      Gtk.Image icon {
-        valign: center;
-        pixel-size: 64;
-        use-fallback: true;
-      }
-
-      Gtk.Label type_label {}
+      pixel-size: 48;
+      use-fallback: true;
     }
 
     Gtk.Box {
       orientation: vertical;
       hexpand: true;
       valign: center;
+      spacing: 6;
 
       Gtk.Box {
         orientation: horizontal;
-        spacing: 6;
-        hexpand: true;
+        spacing: 8;
 
         Gtk.Box {
           orientation: vertical;
           hexpand: true;
+          valign: center;
 
           Gtk.Label name_label {
             ellipsize: end;
@@ -49,24 +43,36 @@ template $SwaySettingsStorageRow: Gtk.ListBoxRow {
             ]
           }
 
-          Gtk.Label size_label {
-            xalign: 0.0;
+          Gtk.Box {
+            spacing: 8;
+
+            Gtk.Label type_label {
+              xalign: 0.0;
+
+              styles [
+                "dim-label",
+                "caption"
+              ]
+            }
+
+            Gtk.Label size_label {
+              xalign: 0.0;
+
+              styles [
+                "dim-label"
+              ]
+            }
           }
         }
 
         Gtk.Button browse_button {
-          label: "Browse";
-          halign: end;
+          label: "Open";
           valign: center;
         }
       }
 
       Gtk.ProgressBar usage_bar {
         overflow: hidden;
-
-        styles [
-          "storage-row-usage"
-        ]
       }
     }
   };

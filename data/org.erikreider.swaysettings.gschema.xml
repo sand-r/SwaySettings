@@ -71,5 +71,21 @@
 				This is a toggle to automatically enable Power Saver when the battery percentage is low.
 			</description>
 		</key>
+
+		<!-- Window -->
+		<key name="window-width" type="i">
+			<default>800</default>
+			<summary>Window width</summary>
+			<description>
+				The width of the settings window.
+			</description>
+		</key>
+		<key name="window-height" type="i">
+			<default>576</default>
+			<summary>Window height</summary>
+			<description>
+				The height of the settings window.
+			</description>
+		</key>
 	</schema>
 </schemalist>

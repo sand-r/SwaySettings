@@ -58,7 +58,7 @@ namespace SwaySettings {
     }
 
     [GtkTemplate (ui = "/org/erikreider/swaysettings/ui/PulseSinkInput.ui")]
-    public class SinkInputRow : Gtk.ListBoxRow {
+    public class SinkInputRow : Adw.PreferencesRow {
         [GtkChild]
         unowned Gtk.ToggleButton mute_toggle;
 
@@ -72,7 +72,7 @@ namespace SwaySettings {
         unowned Gtk.Image icon;
 
         [GtkChild]
-        unowned Gtk.Label title;
+        unowned Gtk.Label app_title;
         [GtkChild]
         unowned Gtk.Label media_name;
 
@@ -85,27 +85,19 @@ namespace SwaySettings {
 
             update (sink_input);
 
-            this.set_activatable (false);
-            this.set_selectable (false);
-
-            scale.add_mark (25, Gtk.PositionType.TOP, null);
-            scale.add_mark (50, Gtk.PositionType.TOP, null);
-            scale.add_mark (75, Gtk.PositionType.TOP, null);
-
             mute_toggle.bind_property ("active",
                                        scale, "sensitive",
                                        BindingFlags.INVERT_BOOLEAN);
             mute_toggle.toggled.connect ((button) => {
-                string icon = button.active
-                    ? PulseContent.TOGGLE_ICON_MUTED
-                    : PulseContent.TOGGLE_ICON_UNMUTED;
-                button.set_icon_name (icon);
+                string btn_icon = button.active
+                    ? PulseContent.OUTPUT_ICON_MUTED
+                    : PulseContent.OUTPUT_ICON_UNMUTED;
+                button.set_icon_name (btn_icon);
 
                 client.set_sink_input_mute (button.active, sink_input);
             });
             scale.value_changed.connect (() => {
                 output_value.label = "%.0lf".printf(Math.round (scale.get_value ()));
-                output_value.label = ((int) scale.get_value ()).to_string ();
                 client.set_sink_input_volume (
                     sink_input,
                     (float) scale.get_value ());
@@ -115,9 +107,9 @@ namespace SwaySettings {
         public void update (PulseSinkInput sink_input) {
             this.sink_input = sink_input;
 
-            title.set_markup (Markup.printf_escaped (
+            app_title.set_markup (Markup.printf_escaped (
                     "<span text_transform='capitalize'>%s</span>", sink_input.name));
-            title.set_visible (sink_input.name != null && sink_input.name.length > 0);
+            app_title.set_visible (sink_input.name != null && sink_input.name.length > 0);
 
             media_name.set_visible (sink_input.media_name != null
                 && sink_input.media_name.length > 0);

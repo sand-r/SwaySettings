@@ -5,7 +5,7 @@ namespace SwaySettings {
     }
 
     [GtkTemplate (ui = "/org/erikreider/swaysettings/ui/StorageRow.ui")]
-    class StorageRow : Gtk.ListBoxRow {
+    class StorageRow : Adw.PreferencesRow {
         const string DEVICE_ICON_DRIVE = "drive-harddisk";
         const string DEVICE_ICON_REMOVABLE_DRIVE = "drive-removable-media";
         const string DEVICE_ICON_REMOVABLE_FLASH = "media-flash";

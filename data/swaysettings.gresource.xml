@@ -32,5 +32,7 @@
       <file>ui/LockerWindow.ui</file>
       <file>ui/PowerPageContent.ui</file>
       <file>ui/PowerDevice.ui</file>
+      <file>ui/MouseContent.ui</file>
+      <file>ui/TrackpadContent.ui</file>
   </gresource>
 </gresources>

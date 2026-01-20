@@ -23,6 +23,7 @@ dep_libnotify = dependency('libnotify', version: '>= 0.8.0')
 dep_glycin = dependency('glycin-2', version: '>= 2.0.0')
 dep_glycin_gtk4 = dependency('glycin-gtk4-2', version: '>= 2.0.0')
 dep_accountsservice = dependency('accountsservice')
+dep_libcanberra = dependency('libcanberra')
 
 shared_deps = [
   dep_glib,

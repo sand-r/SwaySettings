@@ -71,40 +71,18 @@ template $LockerWindow: Gtk.ApplicationWindow {
             ]
           }
 
-          Box entry_box {
+          Entry entry {
             halign: center;
             valign: center;
             hexpand: false;
             vexpand: false;
-            orientation: horizontal;
+            placeholder-text: "Enter Password";
+            input-purpose: password;
+            input-hints: no_emoji | no_spellcheck | private;
 
-            Entry entry {
-              halign: center;
-              valign: center;
-              hexpand: false;
-              vexpand: false;
-              placeholder-text: "Enter Password";
-              input-purpose: password;
-              input-hints: no_emoji | no_spellcheck | private;
-
-              styles [
-                "locker-entry",
-              ]
-            }
-
-            Button button {
-              halign: center;
-              valign: center;
-              hexpand: false;
-              vexpand: false;
-              can-focus: false;
-              icon-name: "right-smaller-symbolic";
-
-              styles [
-                "circular",
-                "locker-unlock",
-              ]
-            }
+            styles [
+              "locker-entry",
+            ]
           }
         };
 

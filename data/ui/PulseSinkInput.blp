@@ -1,23 +1,26 @@
 using Gtk 4.0;
+using Adw 1;
 
-template $SwaySettingsSinkInputRow: ListBoxRow {
-  activatable: true;
-  selectable: true;
+template $SwaySettingsSinkInputRow: Adw.PreferencesRow {
+  activatable: false;
+  selectable: false;
 
-  Box {
+  child: Box {
     orientation: vertical;
+    margin-top: 12;
+    margin-bottom: 12;
+    margin-start: 12;
+    margin-end: 12;
+    spacing: 8;
 
     Box {
       orientation: horizontal;
-      spacing: 8;
-      margin-top: 8;
-      margin-start: 8;
-      margin-end: 8;
+      spacing: 12;
 
       Image icon {
-        icon-name: "application-x-executable-symbolic.symbolic";
-        use-fallback: true;
-        pixel-size: 48;
+        icon-name: "application-x-executable-symbolic";
+        pixel-size: 32;
+        valign: center;
       }
 
       Box {
@@ -25,49 +28,45 @@ template $SwaySettingsSinkInputRow: ListBoxRow {
         valign: center;
         hexpand: true;
 
-        Label title {
+        Label app_title {
           hexpand: true;
-          justify: left;
           ellipsize: end;
-          wrap: true;
-          wrap-mode: word;
           xalign: 0.0;
           label: "title";
 
           styles [
-            "title-3"
+            "heading"
           ]
         }
 
         Label media_name {
           hexpand: true;
-          justify: left;
           ellipsize: end;
-          wrap: true;
-          wrap-mode: word;
           xalign: 0.0;
           label: "media_name";
+
+          styles [
+            "dim-label"
+          ]
         }
       }
     }
 
     Box {
-      margin-bottom: 8;
-      margin-start: 8;
-      margin-end: 8;
+      spacing: 8;
 
       Label output_value {
         width-chars: 3;
+
+        styles [
+          "dim-label"
+        ]
       }
 
       Scale scale {
         orientation: horizontal;
         hexpand: true;
         digits: 0;
-
-        styles [
-          "pulse-scale"
-        ]
 
         adjustment: Adjustment adjustment {
           page-increment: 10.0;
@@ -82,7 +81,11 @@ template $SwaySettingsSinkInputRow: ListBoxRow {
         icon-name: "audio-volume-high-symbolic";
         halign: center;
         valign: center;
+
+        styles [
+          "flat"
+        ]
       }
     }
-  }
+  };
 }

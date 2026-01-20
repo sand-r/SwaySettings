@@ -12,11 +12,19 @@ namespace SwaySettings {
         }
 
         public override Gtk.Widget set_child () {
-            var box = new Gtk.Box (Gtk.Orientation.VERTICAL, 8);
+            var box = new Gtk.Box (Gtk.Orientation.VERTICAL, 24);
+            box.valign = Gtk.Align.START;
+
+            var group = new Adw.PreferencesGroup ();
+            group.title = "Startup Applications";
+            group.description = "Applications that start automatically when you log in";
+
             list_box = new Gtk.ListBox ();
             list_box.selection_mode = Gtk.SelectionMode.NONE;
-            list_box.add_css_class ("content");
+            list_box.add_css_class ("boxed-list");
             add_apps ();
+
+            group.add (list_box);
 
             var add_button = new Gtk.Button.with_label ("Add Application");
             add_button.add_css_class ("pill");
@@ -29,7 +37,7 @@ namespace SwaySettings {
                 });
             });
 
-            box.append (list_box);
+            box.append (group);
             box.append (add_button);
             return box;
         }
@@ -109,15 +117,10 @@ namespace SwaySettings {
     }
 
     [GtkTemplate (ui = "/org/erikreider/swaysettings/ui/StartupAppsItem.ui")]
-    class StartupAppsItem : Gtk.ListBoxRow {
+    class StartupAppsItem : Adw.ActionRow {
 
         [GtkChild]
         unowned Gtk.Image image;
-
-        [GtkChild]
-        unowned Gtk.Label title;
-        [GtkChild]
-        unowned Gtk.Label subtitle;
 
         [GtkChild]
         unowned Gtk.Button button;
@@ -126,10 +129,9 @@ namespace SwaySettings {
 
         public StartupAppsItem (DesktopAppInfo app_info, on_remove callback) {
             Object ();
-            image.set_pixel_size (48);
             image.set_from_gicon (app_info.get_icon ());
-            title.set_text (app_info.get_display_name ());
-            subtitle.set_text (app_info.get_commandline ());
+            this.title = app_info.get_display_name ();
+            this.subtitle = app_info.get_commandline ();
 
             button.clicked.connect (() => callback (app_info));
         }

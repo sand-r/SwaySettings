@@ -3,12 +3,12 @@ using Gee;
 
 namespace SwaySettings {
     public class PulseCardProfile : Object {
-        public string name;
-        public string description;
-        public uint32 n_sinks;
-        public uint32 n_sources;
-        public uint32 priority;
-        int available;
+        public string name { get; set; }
+        public string description { get; set; }
+        public uint32 n_sinks { get; set; }
+        public uint32 n_sources { get; set; }
+        public uint32 priority { get; set; }
+        public int available { get; set; }
 
         public PulseCardProfile (CardProfileInfo2 * profile) {
             this.name = profile->name;
@@ -127,6 +127,8 @@ namespace SwaySettings {
         public string port_description { get; set; }
         /** The port name: `card.profile.port` */
         public string port_id { get; set; }
+        /** Port availability */
+        public PortAvailable port_available { get; set; default = PortAvailable.UNKNOWN; }
         /** All port profiles */
         public string[] port_profiles { get; set; }
         public Array<PulseCardProfile> profiles { get; set; }

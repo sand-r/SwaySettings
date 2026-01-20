@@ -34,13 +34,13 @@ namespace SwaySettings {
         unowned Gtk.Box main_box;
 
         [GtkChild]
-        unowned Gtk.Box battery_group;
+        unowned Adw.PreferencesGroup battery_group;
+        [GtkChild]
+        unowned Adw.ActionRow battery_status_row;
         [GtkChild]
         unowned Gtk.Image battery_group_icon;
         [GtkChild]
         unowned Gtk.Label battery_group_percent;
-        [GtkChild]
-        unowned Gtk.Label battery_group_status;
         [GtkChild]
         unowned Gtk.ProgressBar battery_group_progress;
 
@@ -239,8 +239,7 @@ namespace SwaySettings {
 
             // Status
             string ?state = UPower.UPowerBatteryState.get_battery_status (display_device);
-            battery_group_status.set_text (state);
-            battery_group_status.set_visible (state != null);
+            battery_status_row.set_subtitle (state);
 
             // Progress
             double percent = display_device.percentage;
