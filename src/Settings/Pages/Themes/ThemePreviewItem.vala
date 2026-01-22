@@ -114,7 +114,7 @@ namespace SwaySettings {
                             GlyGtk4.frame_get_texture (frame),
                             frame.get_width (), frame.get_height (),
                             WIDTH, HEIGHT,
-                            Gsk.ScalingFilter.NEAREST,
+                            Gsk.ScalingFilter.TRILINEAR,
                             out new_width, out new_height);
                 background.set_paintable (paintable);
             } catch (Error e) {

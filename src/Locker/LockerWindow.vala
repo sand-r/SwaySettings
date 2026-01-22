@@ -268,14 +268,14 @@ public class LockerWindow : Gtk.ApplicationWindow {
             frame_request.set_scale (monitor.geometry.width, monitor.geometry.height);
             Gly.Frame frame = yield image.get_specific_frame_async (frame_request, null);
 
-            // Scale the texture
+            // Scale the texture with trilinear filter for smooth scaling
             float new_width, new_height;
             Gdk.Paintable ?paintable
                 = SwaySettings.Functions.gdk_texture_scale (
                         GlyGtk4.frame_get_texture (frame),
                         frame.get_width (), frame.get_height (),
                         monitor.geometry.width, monitor.geometry.height,
-                        Gsk.ScalingFilter.NEAREST,
+                        Gsk.ScalingFilter.TRILINEAR,
                         out new_width, out new_height);
             picture.set_paintable (paintable);
         } catch (Error e) {
