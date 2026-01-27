@@ -16,14 +16,12 @@ dep_libxml = dependency('libxml-2.0')
 dep_udisks2 = dependency('udisks2')
 dep_libgtop = dependency('libgtop-2.0')
 dep_gtk4_layer_shell = dependency('gtk4-layer-shell-0', version: '>= 1.2.0')
-dep_libpulse = dependency('libpulse')
-dep_libpulse_mainloop_glib = dependency('libpulse-mainloop-glib')
 dep_upower_glib = dependency('upower-glib', version: '>= 1.90.0')
 dep_libnotify = dependency('libnotify', version: '>= 0.8.0')
 dep_glycin = dependency('glycin-2', version: '>= 2.0.0')
 dep_glycin_gtk4 = dependency('glycin-gtk4-2', version: '>= 2.0.0')
 dep_accountsservice = dependency('accountsservice')
-dep_libcanberra = dependency('libcanberra')
+dep_wireplumber = dependency('wireplumber-0.5', version: '>= 0.5.0')
 
 shared_deps = [
   dep_glib,

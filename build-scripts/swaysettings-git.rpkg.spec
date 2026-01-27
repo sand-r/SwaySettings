@@ -17,7 +17,7 @@ BuildRequires: pkgconfig(gtk4-layer-shell-0) >= 1.1.1
 BuildRequires: libadwaita-devel >= 1.6
 BuildRequires: pkgconfig(gsettings-desktop-schemas)
 BuildRequires: granite-7-devel >= 7.5
-BuildRequires: pulseaudio-libs-devel
+BuildRequires: pkgconfig(wireplumber-0.5)
 BuildRequires: accountsservice-devel
 BuildRequires: bluez-libs-devel
 BuildRequires: blueprint-compiler

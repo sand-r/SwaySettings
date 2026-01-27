@@ -32,11 +32,9 @@ executable(
     dep_libxml,
     dep_udisks2,
     dep_libgtop,
-    dep_libpulse,
-    dep_libpulse_mainloop_glib,
     dep_glycin,
     dep_glycin_gtk4,
-    dep_libcanberra,
+    dep_wireplumber,
   ]
   + shared_deps,
   install: true,

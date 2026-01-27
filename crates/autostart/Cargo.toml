@@ -1,0 +1,12 @@
+[package]
+name = "sway-autostart"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+
+glib.workspace = true
+gio.workspace = true
+

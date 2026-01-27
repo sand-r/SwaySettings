@@ -283,7 +283,7 @@ namespace SwaySettings {
                     page = new BluetoothPage (item, content_page);
                     break;
                 case SOUND:
-                    page = new PulsePage (item, content_page);
+                    page = new SoundPage (item, content_page);
                     break;
                 case KEYBOARD:
                     page = new KeyboardPage (item, content_page, ipc);

@@ -1,0 +1,92 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $SwaySettingsSoundContent: Adw.Bin {
+  child: Box {
+    spacing: 24;
+    orientation: vertical;
+    valign: start;
+
+    Adw.PreferencesGroup output_group {
+      title: 'Output';
+
+      Adw.ComboRow output_device_row {
+        title: 'Output Device';
+      }
+
+      Adw.ActionRow {
+        title: 'Volume';
+
+        [suffix]
+        Box {
+          spacing: 8;
+          valign: center;
+
+          ToggleButton output_mute_toggle {
+            icon-name: 'audio-volume-high-symbolic';
+            valign: center;
+
+            styles [
+              "flat"
+            ]
+          }
+
+          Scale output_slider {
+            adjustment: Adjustment {
+              page-increment: 10.0;
+              step-increment: 1.0;
+              value: 0;
+              lower: 0;
+              upper: 150.0;
+            };
+
+            digits: 0;
+            hexpand: true;
+            width-request: 200;
+          }
+        }
+      }
+    }
+
+    Adw.PreferencesGroup input_group {
+      title: 'Input';
+
+      Adw.ComboRow input_device_row {
+        title: 'Input Device';
+      }
+
+      Adw.ActionRow {
+        title: 'Volume';
+
+        [suffix]
+        Box {
+          spacing: 8;
+          valign: center;
+
+          ToggleButton input_mute_toggle {
+            icon-name: 'audio-input-microphone-symbolic';
+            valign: center;
+
+            styles [
+              "flat"
+            ]
+          }
+
+          Scale input_slider {
+            adjustment: Adjustment {
+              page-increment: 10.0;
+              step-increment: 1.0;
+              value: 0;
+              lower: 0;
+              upper: 150.0;
+            };
+
+            digits: 0;
+            hexpand: true;
+            width-request: 200;
+          }
+        }
+      }
+    }
+  };
+}

@@ -1,0 +1,25 @@
+[package]
+name = "swaysettings-locker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+clap.workspace = true
+chrono.workspace = true
+
+swaysettings-core = { path = "../core" }
+
+# GNOME stack
+
+glib.workspace = true
+gio.workspace = true
+gtk4.workspace = true
+libadwaita.workspace = true
+gdk4.workspace = true
+
+whoami.workspace = true
+libc.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "swaysettings-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+once_cell.workspace = true
+log.workspace = true
+
+# GNOME stack
+glib.workspace = true
+gio.workspace = true
+gdk4.workspace = true
+gsk4.workspace = true
+graphene.workspace = true
+gtk4.workspace = true
+gdk-pixbuf.workspace = true
+
+[build-dependencies]
+glib-build-tools = "0.19"

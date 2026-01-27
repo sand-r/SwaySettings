@@ -1,0 +1,19 @@
+[package]
+name = "xdg-desktop-portal-swaysettings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+swaysettings-core = { path = "../core" }
+
+zbus.workspace = true
+glib.workspace = true
+gio.workspace = true
+libadwaita.workspace = true
+gdk4.workspace = true
+

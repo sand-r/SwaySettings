@@ -91,7 +91,8 @@ makepkg -si
 - libxml2
 - xkeyboard-config
 - accountsservice
-- libpulse
+- pipewire
+- wireplumber
 - bluez
 
 #### Build
