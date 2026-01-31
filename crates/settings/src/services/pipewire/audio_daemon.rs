@@ -8,6 +8,7 @@ use std::thread;
 use pipewire as pw;
 use pipewire::context::ContextRc;
 use pipewire::main_loop::MainLoopRc;
+use pipewire::metadata::Metadata;
 use pipewire::registry::GlobalObject;
 use pipewire::spa::param::ParamType;
 use pipewire::spa::pod::deserialize::PodDeserializer;
@@ -24,6 +25,15 @@ use pipewire::types::ObjectType;
 pub enum DeviceType {
     Sink,
     Source,
+}
+
+impl DeviceType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            DeviceType::Sink => "sink",
+            DeviceType::Source => "source",
+        }
+    }
 }
 
 /// Information about an audio device
@@ -130,6 +140,12 @@ struct DeviceState {
     channel_count: u32,
 }
 
+/// State for metadata (default device tracking)
+struct MetadataState {
+    metadata: Metadata,
+    _listener: pipewire::metadata::MetadataListener,
+}
+
 /// Run the PipeWire main loop
 fn run_pipewire_loop<F>(
     command_rx: mpsc::Receiver<AudioCommand>,
@@ -150,17 +166,19 @@ where
 
     // Shared state
     let devices: Rc<RefCell<HashMap<u32, DeviceState>>> = Rc::new(RefCell::new(HashMap::new()));
-    let default_sink: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(None));
-    let default_source: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(None));
+    let default_sink_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let default_source_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let metadata_state: Rc<RefCell<Option<MetadataState>>> = Rc::new(RefCell::new(None));
 
-    // Clone for closures
-    let devices_clone = devices.clone();
+    // Clone for closures - each closure that captures with `move` needs its own clone
+    let devices_for_global = devices.clone();
     let devices_for_remove = devices.clone();
     let devices_for_commands = devices.clone();
-    let default_sink_clone = default_sink.clone();
-    let default_source_clone = default_source.clone();
-    let registry_for_bind = registry.clone();
-    let registry_clone = registry.clone();
+    let default_sink_name_for_global = default_sink_name.clone();
+    let default_source_name_for_global = default_source_name.clone();
+    let metadata_state_for_global = metadata_state.clone();
+    let metadata_state_for_commands = metadata_state.clone();
+    let registry_for_global = registry.clone();
 
     // Wrap callback in Rc for sharing
     let event_callback = Rc::new(event_callback);
@@ -169,15 +187,29 @@ where
     let event_callback_for_params = event_callback.clone();
 
     // Registry listener for global objects
-    let _registry_listener = registry_for_bind
+    let _registry_listener = registry
         .add_listener_local()
         .global(move |global| {
+            // Handle metadata objects
+            if global.type_ == ObjectType::Metadata {
+                handle_metadata_added(
+                    global,
+                    &registry_for_global,
+                    &metadata_state_for_global,
+                    &devices_for_global,
+                    &default_sink_name_for_global,
+                    &default_source_name_for_global,
+                    event_callback_for_global.clone(),
+                );
+                return;
+            }
+
             handle_global_added(
                 global,
-                &registry_clone,
-                &devices_clone,
-                &default_sink_clone,
-                &default_source_clone,
+                &registry_for_global,
+                &devices_for_global,
+                &default_sink_name_for_global,
+                &default_source_name_for_global,
                 event_callback_for_global.as_ref(),
                 event_callback_for_params.clone(),
             );
@@ -221,12 +253,21 @@ where
             AudioCommand::SetMute(id, muted) => {
                 set_device_mute(&devices_for_commands, id, muted);
             }
-            AudioCommand::SetDefaultSink(_id) => {
-                // Changing default requires WirePlumber metadata - not implemented yet
-                log::debug!("SetDefaultSink not yet implemented");
+            AudioCommand::SetDefaultSink(id) => {
+                set_default_device(
+                    &devices_for_commands,
+                    &metadata_state_for_commands,
+                    id,
+                    DeviceType::Sink,
+                );
             }
-            AudioCommand::SetDefaultSource(_id) => {
-                log::debug!("SetDefaultSource not yet implemented");
+            AudioCommand::SetDefaultSource(id) => {
+                set_default_device(
+                    &devices_for_commands,
+                    &metadata_state_for_commands,
+                    id,
+                    DeviceType::Source,
+                );
             }
         }
     });
@@ -246,8 +287,8 @@ fn handle_global_added<F>(
     global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
     registry: &pipewire::registry::Registry,
     devices: &Rc<RefCell<HashMap<u32, DeviceState>>>,
-    default_sink: &Rc<RefCell<Option<u32>>>,
-    default_source: &Rc<RefCell<Option<u32>>>,
+    default_sink_name: &Rc<RefCell<Option<String>>>,
+    default_source_name: &Rc<RefCell<Option<String>>>,
     event_callback: &F,
     event_callback_rc: Rc<F>,
 ) where
@@ -283,11 +324,17 @@ fn handle_global_added<F>(
         return;
     }
 
-    let description = props
-        .get("node.description")
-        .or_else(|| props.get("node.nick"))
-        .unwrap_or(&name)
-        .to_string();
+    // Prefer node.nick (specific port name like "Speaker", "Headphones", "HDMI 1")
+    // over node.description (card name like "Lunar Lake-M HD Audio Controller")
+    let nick = props.get("node.nick");
+    let card_desc = props.get("node.description");
+
+    let description = match (nick, card_desc) {
+        (Some(n), Some(c)) if !n.is_empty() => format!("{} - {}", n, c),
+        (Some(n), _) if !n.is_empty() => n.to_string(),
+        (_, Some(c)) if !c.is_empty() => c.to_string(),
+        _ => name.clone(),
+    };
 
     if let Some(available) = props.get("port.available") {
         if available == "no" {
@@ -297,13 +344,25 @@ fn handle_global_added<F>(
 
     let id = global.id;
 
+    // Check if this device is the current default
+    let is_default = match device_type {
+        DeviceType::Sink => default_sink_name
+            .borrow()
+            .as_ref()
+            .map_or(false, |n| n == &name),
+        DeviceType::Source => default_source_name
+            .borrow()
+            .as_ref()
+            .map_or(false, |n| n == &name),
+    };
+
     let info = DeviceInfo {
         id,
         name: name.clone(),
         description,
         volume: 1.0,
         is_muted: false,
-        is_default: false,
+        is_default,
         device_type,
     };
 
@@ -316,8 +375,9 @@ fn handle_global_added<F>(
     };
 
     let devices_for_listener = devices.clone();
-    let default_sink_for_listener = default_sink.clone();
-    let default_source_for_listener = default_source.clone();
+    let default_sink_name_for_listener = default_sink_name.clone();
+    let default_source_name_for_listener = default_source_name.clone();
+    let name_for_listener = name.clone();
 
     let listener = node
         .add_listener_local()
@@ -338,13 +398,27 @@ fn handle_global_added<F>(
                     state.info.is_muted = muted;
                     state.channel_count = channel_count;
 
+                    // Update is_default based on name comparison
                     let is_default = match state.info.device_type {
-                        DeviceType::Sink => *default_sink_for_listener.borrow() == Some(id),
-                        DeviceType::Source => *default_source_for_listener.borrow() == Some(id),
+                        DeviceType::Sink => default_sink_name_for_listener
+                            .borrow()
+                            .as_ref()
+                            .map_or(false, |n| n == &name_for_listener),
+                        DeviceType::Source => default_source_name_for_listener
+                            .borrow()
+                            .as_ref()
+                            .map_or(false, |n| n == &name_for_listener),
                     };
                     state.info.is_default = is_default;
 
                     if changed {
+                        log::debug!(
+                            "Device {} ({}) changed: vol={:.2}, muted={}",
+                            state.info.description,
+                            state.info.device_type.name(),
+                            volume,
+                            muted
+                        );
                         event_callback_rc(AudioEvent::DeviceChanged(state.info.clone()));
                     }
                 }
@@ -353,6 +427,14 @@ fn handle_global_added<F>(
         .register();
 
     node.subscribe_params(&[ParamType::Props]);
+
+    log::debug!(
+        "Added {} device: {} (id={}, default={})",
+        device_type.name(),
+        info.description,
+        id,
+        is_default
+    );
 
     let state = DeviceState {
         info: info.clone(),
@@ -416,11 +498,22 @@ fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
 /// Set volume for a device via PipeWire
 fn set_device_volume(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, volume: f64) {
     let devs = devices.borrow();
-    let Some(state) = devs.get(&id) else { return };
+    let Some(state) = devs.get(&id) else {
+        log::warn!("set_device_volume: device {} not found", id);
+        return;
+    };
 
     let volume_f32 = volume as f32;
     let channel_count = state.channel_count.max(1) as usize;
     let volumes: Vec<f32> = vec![volume_f32; channel_count];
+
+    log::debug!(
+        "Setting volume for device {} ({}, {} channels): {:.3}",
+        id,
+        state.info.device_type.name(),
+        channel_count,
+        volume
+    );
 
     // Build Props object with channelVolumes
     let obj = Object {
@@ -453,7 +546,12 @@ fn set_device_volume(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, 
 /// Set mute state for a device via PipeWire
 fn set_device_mute(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, muted: bool) {
     let devs = devices.borrow();
-    let Some(state) = devs.get(&id) else { return };
+    let Some(state) = devs.get(&id) else {
+        log::warn!("set_device_mute: device {} not found", id);
+        return;
+    };
+
+    log::debug!("Setting mute for device {}: {}", id, muted);
 
     let obj = Object {
         type_: SPA_TYPE_OBJECT_Props,
@@ -479,4 +577,169 @@ fn set_device_mute(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, mu
             log::error!("Failed to serialize mute pod: {:?}", e);
         }
     }
+}
+
+/// Handle metadata object added (for tracking default devices)
+fn handle_metadata_added<F>(
+    global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+    registry: &pipewire::registry::Registry,
+    metadata_state: &Rc<RefCell<Option<MetadataState>>>,
+    devices: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    default_sink_name: &Rc<RefCell<Option<String>>>,
+    default_source_name: &Rc<RefCell<Option<String>>>,
+    event_callback: Rc<F>,
+) where
+    F: Fn(AudioEvent) + 'static,
+{
+    let props = match global.props {
+        Some(props) => props,
+        None => return,
+    };
+
+    // Only interested in the "default" metadata
+    let metadata_name = props.get("metadata.name").unwrap_or("");
+    if metadata_name != "default" {
+        return;
+    }
+
+    log::debug!("Found default metadata object (id={})", global.id);
+
+    let metadata: Metadata = match registry.bind(global) {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("Failed to bind metadata: {}", e);
+            return;
+        }
+    };
+
+    let default_sink_name_for_listener = default_sink_name.clone();
+    let default_source_name_for_listener = default_source_name.clone();
+    let devices_for_listener = devices.clone();
+    let event_callback_for_listener = event_callback.clone();
+
+    let listener = metadata
+        .add_listener_local()
+        .property(move |_subject, key, _type, value| {
+            let Some(key) = key else { return 0 };
+
+            match key {
+                "default.audio.sink" => {
+                    let new_name = value.and_then(parse_metadata_name);
+                    log::debug!("Default sink changed: {:?}", new_name);
+
+                    let old_name = default_sink_name_for_listener.borrow().clone();
+                    if old_name != new_name {
+                        *default_sink_name_for_listener.borrow_mut() = new_name.clone();
+
+                        // Find device ID by name and emit event
+                        let devs = devices_for_listener.borrow();
+                        let mut default_id = None;
+                        for state in devs.values() {
+                            if state.info.device_type == DeviceType::Sink {
+                                if new_name.as_ref() == Some(&state.info.name) {
+                                    default_id = Some(state.info.id);
+                                    break;
+                                }
+                            }
+                        }
+                        drop(devs);
+                        event_callback_for_listener(AudioEvent::DefaultChanged(
+                            DeviceType::Sink,
+                            default_id,
+                        ));
+                    }
+                }
+                "default.audio.source" => {
+                    let new_name = value.and_then(parse_metadata_name);
+                    log::debug!("Default source changed: {:?}", new_name);
+
+                    let old_name = default_source_name_for_listener.borrow().clone();
+                    if old_name != new_name {
+                        *default_source_name_for_listener.borrow_mut() = new_name.clone();
+
+                        let devs = devices_for_listener.borrow();
+                        let mut default_id = None;
+                        for state in devs.values() {
+                            if state.info.device_type == DeviceType::Source {
+                                if new_name.as_ref() == Some(&state.info.name) {
+                                    default_id = Some(state.info.id);
+                                    break;
+                                }
+                            }
+                        }
+                        drop(devs);
+                        event_callback_for_listener(AudioEvent::DefaultChanged(
+                            DeviceType::Source,
+                            default_id,
+                        ));
+                    }
+                }
+                _ => {}
+            }
+            0
+        })
+        .register();
+
+    *metadata_state.borrow_mut() = Some(MetadataState {
+        metadata,
+        _listener: listener,
+    });
+}
+
+/// Parse device name from metadata JSON value (e.g., {"name":"alsa_output.pci..."})
+fn parse_metadata_name(json: &str) -> Option<String> {
+    // Simple JSON parsing for {"name":"value"} format
+    let json = json.trim();
+    if !json.starts_with('{') || !json.ends_with('}') {
+        return None;
+    }
+
+    // Find "name" key
+    let name_key = "\"name\"";
+    let pos = json.find(name_key)?;
+    let rest = &json[pos + name_key.len()..];
+
+    // Skip whitespace and colon
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix(':')?;
+    let rest = rest.trim_start();
+
+    // Extract string value
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Set default device via metadata
+fn set_default_device(
+    devices: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    metadata_state: &Rc<RefCell<Option<MetadataState>>>,
+    id: u32,
+    device_type: DeviceType,
+) {
+    let devs = devices.borrow();
+    let Some(state) = devs.get(&id) else {
+        log::warn!("set_default_device: device {} not found", id);
+        return;
+    };
+
+    let device_name = state.info.name.clone();
+    drop(devs);
+
+    let meta_state = metadata_state.borrow();
+    let Some(meta) = meta_state.as_ref() else {
+        log::warn!("set_default_device: no metadata object available");
+        return;
+    };
+
+    let key = match device_type {
+        DeviceType::Sink => "default.audio.sink",
+        DeviceType::Source => "default.audio.source",
+    };
+
+    let json_value = format!(r#"{{"name":"{}"}}"#, device_name);
+    log::debug!("Setting {} to {}", key, json_value);
+
+    meta.metadata
+        .set_property(0, key, Some("Spa:String:JSON"), Some(&json_value));
 }

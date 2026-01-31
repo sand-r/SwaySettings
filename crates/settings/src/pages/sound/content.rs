@@ -124,6 +124,53 @@ impl SoundContent {
 
         row.set_model(Some(model));
         row.set_expression(Some(expression));
+
+        // Create a custom factory for the dropdown that shows full text with icon
+        let factory = gtk4::SignalListItemFactory::new();
+
+        factory.connect_setup(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+
+            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            hbox.set_margin_start(12);
+            hbox.set_margin_end(12);
+            hbox.set_margin_top(8);
+            hbox.set_margin_bottom(8);
+
+            let icon = gtk4::Image::new();
+            icon.set_icon_size(gtk4::IconSize::Normal);
+            hbox.append(&icon);
+
+            let label = gtk4::Label::new(None);
+            label.set_xalign(0.0);
+            label.set_hexpand(true);
+            // Don't ellipsize - show full text
+            label.set_ellipsize(gtk4::pango::EllipsizeMode::None);
+            label.set_wrap(true);
+            label.set_wrap_mode(gtk4::pango::WrapMode::Word);
+            hbox.append(&label);
+
+            list_item.set_child(Some(&hbox));
+        });
+
+        factory.connect_bind(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+            let item = list_item.item().and_downcast::<AudioDevice>();
+            let hbox = list_item.child().and_downcast::<gtk4::Box>();
+
+            if let (Some(device), Some(hbox)) = (item, hbox) {
+                // Get icon and label from hbox
+                if let Some(icon) = hbox.first_child().and_downcast::<gtk4::Image>() {
+                    let icon_name = get_device_icon(&device);
+                    icon.set_icon_name(Some(icon_name));
+                }
+                if let Some(label) = hbox.last_child().and_downcast::<gtk4::Label>() {
+                    label.set_label(&device.description());
+                }
+            }
+        });
+
+        row.set_list_factory(Some(&factory));
     }
 
     fn connect_output_controls(&self) {
@@ -578,5 +625,35 @@ impl SoundContent {
 impl Default for SoundContent {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Get an appropriate icon name for an audio device based on its name/description
+fn get_device_icon(device: &AudioDevice) -> &'static str {
+    let desc = device.description().to_lowercase();
+    let name = device.name().to_lowercase();
+
+    // Check for specific device types
+    if desc.contains("headphone") || name.contains("headphone") {
+        return "audio-headphones-symbolic";
+    }
+    if desc.contains("headset") || name.contains("headset") {
+        return "audio-headset-symbolic";
+    }
+    if desc.contains("hdmi") || name.contains("hdmi") || desc.contains("displayport") {
+        return "video-display-symbolic";
+    }
+    if desc.contains("bluetooth") || name.contains("bluez") {
+        return "bluetooth-symbolic";
+    }
+    if desc.contains("usb") || name.contains("usb") {
+        return "audio-card-symbolic";
+    }
+
+    // Default based on device type (sink vs source)
+    if device.is_sink() {
+        "audio-speakers-symbolic"
+    } else {
+        "audio-input-microphone-symbolic"
     }
 }
