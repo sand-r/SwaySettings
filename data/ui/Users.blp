@@ -2,93 +2,107 @@ using Gtk 4.0;
 using Adw 1;
 
 template $SwaySettingsUsersContent: Adw.Bin {
-  ScrolledWindow {
-    Viewport {
-      Box {
+  child: Gtk.ScrolledWindow {
+    hexpand: true;
+    vexpand: true;
+
+    child: Adw.Clamp {
+      maximum-size: 600;
+      tightening-threshold: 400;
+      margin-top: 24;
+      margin-bottom: 24;
+      margin-start: 16;
+      margin-end: 16;
+
+      child: Gtk.Box {
         halign: center;
         spacing: 12;
         valign: start;
 
-        Adw.Avatar avatar {
-          show-initials: true;
-          size: 144;
-          valign: center;
+        Gtk.MenuButton avatar_button {
+          Adw.Avatar avatar {
+            show-initials: true;
+            size: 144;
+            valign: center;
+          }
 
-          Popover popover {
-            ScrolledWindow {
+          popover: Gtk.Popover popover {
+            Gtk.ScrolledWindow {
               hscrollbar-policy: never;
               min-content-height: 196;
               propagate-natural-width: true;
 
-              Viewport {
-                FlowBox popover_flowbox {
-                  homogeneous: true;
-                  max-children-per-line: 5;
-                  min-children-per-line: 4;
-                  selection-mode: none;
-                }
-              }
+              child: Gtk.FlowBox popover_flowbox {
+                homogeneous: true;
+                max-children-per-line: 5;
+                min-children-per-line: 4;
+                selection-mode: none;
+              };
             }
-          }
+          };
+
+          styles [
+            "flat"
+          ]
         }
 
-        Box {
+        Gtk.Box {
           orientation: vertical;
           spacing: 4;
           valign: center;
 
-          Box {
+          Gtk.Box {
             spacing: 8;
 
-            Stack title_stack {
+            Gtk.Stack title_stack {
               transition-type: crossfade;
 
-              StackPage {
-                child: Label title {
-                  label: 'Name';
+              Gtk.StackPage {
+                child: Gtk.Label title {
+                  label: "Name";
                   xalign: 0.0;
 
                   styles [
-                    "title-1",
+                    "title-1"
                   ]
                 };
 
-                name: 'title';
+                name: "title";
               }
 
-              StackPage {
-                child: Entry title_entry {
+              Gtk.StackPage {
+                child: Gtk.Entry title_entry {
                   input-purpose: name;
-                  placeholder-text: 'Name';
+                  placeholder-text: "Name";
                 };
 
-                name: 'entry';
+                name: "entry";
               }
             }
 
-            ToggleButton title_button {
+            Gtk.ToggleButton title_button {
               accessible-role: toggle_button;
               halign: center;
-              icon-name: 'document-edit-symbolic';
+              icon-name: "document-edit-symbolic";
               valign: center;
 
               styles [
-                "circular",
+                "circular"
               ]
             }
           }
 
-          Label subtitle {
-            label: 'Subtitle';
+          Gtk.Label subtitle {
+            label: "Subtitle";
             xalign: 0.0;
           }
 
-          Label subtitle2 {
-            label: 'Subtitle2';
+          Gtk.Label subtitle2 {
+            label: "Subtitle2";
             xalign: 0.0;
           }
         }
-      }
-    }
-  }
+      };
+    };
+  };
 }

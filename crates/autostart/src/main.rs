@@ -1,4 +1,5 @@
 use gio::prelude::*;
+use gio_unix::prelude::*;
 
 fn main() -> anyhow::Result<()> {
     let mut autostart_path = glib::user_config_dir();
@@ -18,7 +19,7 @@ fn main() -> anyhow::Result<()> {
 
     while let Some(info) = enumerator.next_file(None::<&gio::Cancellable>)? {
         let file_path = autostart_path.join(info.name());
-        if let Some(app) = gio::DesktopAppInfo::from_filename(file_path) {
+        if let Some(app) = gio_unix::DesktopAppInfo::from_filename(file_path) {
             if app.is_hidden() {
                 continue;
             }

@@ -8,102 +8,124 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
   <requires lib="gtk" version="4.0"/>
   <template class="SwaySettingsSoundContent" parent="AdwBin">
     <property name="child">
-      <object class="GtkBox">
-        <property name="spacing">24</property>
-        <property name="orientation">1</property>
-        <property name="valign">1</property>
-        <child>
-          <object class="AdwPreferencesGroup" id="output_group">
-            <property name="title">Output</property>
-            <child>
-              <object class="AdwComboRow" id="output_device_row">
-                <property name="title">Output Device</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwActionRow">
-                <property name="title">Volume</property>
-                <child type="suffix">
-                  <object class="GtkBox">
-                    <property name="spacing">8</property>
-                    <property name="valign">3</property>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">2</property>
+        <property name="vexpand">true</property>
+        <property name="child">
+          <object class="AdwClamp">
+            <property name="maximum-size">600</property>
+            <property name="margin-top">24</property>
+            <property name="margin-bottom">24</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="spacing">24</property>
+                <property name="orientation">1</property>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Output</property>
                     <child>
-                      <object class="GtkToggleButton" id="output_mute_toggle">
-                        <property name="icon-name">audio-volume-high-symbolic</property>
-                        <property name="valign">3</property>
-                        <style>
-                          <class name="flat"/>
-                        </style>
+                      <object class="AdwComboRow" id="output_device_row">
+                        <property name="title">Output Device</property>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkScale" id="output_slider">
-                        <property name="adjustment">
-                          <object class="GtkAdjustment">
-                            <property name="page-increment">10</property>
-                            <property name="step-increment">1</property>
-                            <property name="value">0</property>
-                            <property name="lower">0</property>
-                            <property name="upper">150</property>
+                      <object class="AdwActionRow">
+                        <property name="title">Volume</property>
+                        <child type="suffix">
+                          <object class="GtkBox">
+                            <property name="spacing">12</property>
+                            <property name="valign">3</property>
+                            <child>
+                              <object class="GtkScale" id="output_slider">
+                                <property name="adjustment">
+                                  <object class="GtkAdjustment">
+                                    <property name="page-increment">10</property>
+                                    <property name="step-increment">1</property>
+                                    <property name="value">0</property>
+                                    <property name="lower">0</property>
+                                    <property name="upper">100</property>
+                                  </object>
+                                </property>
+                                <property name="draw-value">true</property>
+                                <property name="value-pos">1</property>
+                                <property name="digits">0</property>
+                                <property name="hexpand">true</property>
+                                <property name="width-request">200</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkToggleButton" id="output_mute_toggle">
+                                <property name="icon-name">audio-volume-high-symbolic</property>
+                                <property name="valign">3</property>
+                                <property name="tooltip-text">Mute</property>
+                                <style>
+                                  <class name="flat"/>
+                                  <class name="circular"/>
+                                </style>
+                              </object>
+                            </child>
                           </object>
-                        </property>
-                        <property name="digits">0</property>
-                        <property name="hexpand">true</property>
-                        <property name="width-request">200</property>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Input</property>
+                    <child>
+                      <object class="AdwComboRow" id="input_device_row">
+                        <property name="title">Input Device</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow">
+                        <property name="title">Volume</property>
+                        <child type="suffix">
+                          <object class="GtkBox">
+                            <property name="spacing">12</property>
+                            <property name="valign">3</property>
+                            <child>
+                              <object class="GtkScale" id="input_slider">
+                                <property name="adjustment">
+                                  <object class="GtkAdjustment">
+                                    <property name="page-increment">10</property>
+                                    <property name="step-increment">1</property>
+                                    <property name="value">0</property>
+                                    <property name="lower">0</property>
+                                    <property name="upper">100</property>
+                                  </object>
+                                </property>
+                                <property name="draw-value">true</property>
+                                <property name="value-pos">1</property>
+                                <property name="digits">0</property>
+                                <property name="hexpand">true</property>
+                                <property name="width-request">200</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkToggleButton" id="input_mute_toggle">
+                                <property name="icon-name">audio-input-microphone-symbolic</property>
+                                <property name="valign">3</property>
+                                <property name="tooltip-text">Mute</property>
+                                <style>
+                                  <class name="flat"/>
+                                  <class name="circular"/>
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
                       </object>
                     </child>
                   </object>
                 </child>
               </object>
-            </child>
+            </property>
           </object>
-        </child>
-        <child>
-          <object class="AdwPreferencesGroup" id="input_group">
-            <property name="title">Input</property>
-            <child>
-              <object class="AdwComboRow" id="input_device_row">
-                <property name="title">Input Device</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwActionRow">
-                <property name="title">Volume</property>
-                <child type="suffix">
-                  <object class="GtkBox">
-                    <property name="spacing">8</property>
-                    <property name="valign">3</property>
-                    <child>
-                      <object class="GtkToggleButton" id="input_mute_toggle">
-                        <property name="icon-name">audio-input-microphone-symbolic</property>
-                        <property name="valign">3</property>
-                        <style>
-                          <class name="flat"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkScale" id="input_slider">
-                        <property name="adjustment">
-                          <object class="GtkAdjustment">
-                            <property name="page-increment">10</property>
-                            <property name="step-increment">1</property>
-                            <property name="value">0</property>
-                            <property name="lower">0</property>
-                            <property name="upper">150</property>
-                          </object>
-                        </property>
-                        <property name="digits">0</property>
-                        <property name="hexpand">true</property>
-                        <property name="width-request">200</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-          </object>
-        </child>
+        </property>
       </object>
     </property>
   </template>

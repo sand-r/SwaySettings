@@ -15,7 +15,7 @@ pub fn load_css(resource_path: &str, priority: u32) {
     init_resources();
     let provider = gtk4::CssProvider::new();
     provider.load_from_resource(resource_path);
-    gtk4::StyleContext::add_provider_for_display(
+    gtk4::style_context_add_provider_for_display(
         &gdk4::Display::default().expect("display"),
         &provider,
         priority,

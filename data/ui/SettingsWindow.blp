@@ -1,0 +1,48 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $SwaySettingsWindow: Adw.ApplicationWindow {
+  title: "Settings";
+  default-width: 900;
+  default-height: 600;
+  width-request: 500;
+  height-request: 300;
+
+  content: Adw.NavigationSplitView split_view {
+    show-content: true;
+    min-sidebar-width: 220;
+    max-sidebar-width: 280;
+
+    sidebar: Adw.NavigationPage {
+      title: "Settings";
+
+      child: Adw.ToolbarView {
+        [top]
+        Adw.HeaderBar {}
+
+        content: Gtk.ScrolledWindow {
+          hscrollbar-policy: never;
+
+          child: Gtk.ListBox sidebar_listbox {
+            selection-mode: single;
+            hexpand: true;
+            vexpand: true;
+
+            styles [
+              "navigation-sidebar"
+            ]
+          };
+        };
+      };
+    };
+
+    content: Adw.NavigationPage content_page {
+      title: "Settings";
+
+      child: Adw.ToolbarView content_toolbar {
+        [top]
+        Adw.HeaderBar {}
+      };
+    };
+  };
+}

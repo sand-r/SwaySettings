@@ -100,10 +100,16 @@ fn build_lock_window(app: &libadwaita::Application, monitor: &gdk4::Monitor) -> 
     let date_label = window.date_label();
 
     update_time_labels(&time_label, &date_label);
-    glib::timeout_add_seconds_local(60, clone!(@strong time_label, @strong date_label => @default-return glib::ControlFlow::Continue, move || {
-        update_time_labels(&time_label, &date_label);
-        glib::ControlFlow::Continue
-    }));
+    glib::timeout_add_seconds_local(60, clone!(
+        #[strong]
+        time_label,
+        #[strong]
+        date_label,
+        move || {
+            update_time_labels(&time_label, &date_label);
+            glib::ControlFlow::Continue
+        }
+    ));
 
     LockWindow { window, entry }
 }

@@ -7,43 +7,54 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
 <interface>
   <requires lib="gtk" version="4.0"/>
   <template class="SwaySettingsUsersContent" parent="AdwBin">
-    <child>
+    <property name="child">
       <object class="GtkScrolledWindow">
-        <child>
-          <object class="GtkViewport">
-            <child>
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
+        <property name="child">
+          <object class="AdwClamp">
+            <property name="maximum-size">600</property>
+            <property name="tightening-threshold">400</property>
+            <property name="margin-top">24</property>
+            <property name="margin-bottom">24</property>
+            <property name="margin-start">16</property>
+            <property name="margin-end">16</property>
+            <property name="child">
               <object class="GtkBox">
                 <property name="halign">3</property>
                 <property name="spacing">12</property>
                 <property name="valign">1</property>
                 <child>
-                  <object class="AdwAvatar" id="avatar">
-                    <property name="show-initials">true</property>
-                    <property name="size">144</property>
-                    <property name="valign">3</property>
+                  <object class="GtkMenuButton" id="avatar_button">
                     <child>
+                      <object class="AdwAvatar" id="avatar">
+                        <property name="show-initials">true</property>
+                        <property name="size">144</property>
+                        <property name="valign">3</property>
+                      </object>
+                    </child>
+                    <property name="popover">
                       <object class="GtkPopover" id="popover">
                         <child>
                           <object class="GtkScrolledWindow">
                             <property name="hscrollbar-policy">2</property>
                             <property name="min-content-height">196</property>
                             <property name="propagate-natural-width">true</property>
-                            <child>
-                              <object class="GtkViewport">
-                                <child>
-                                  <object class="GtkFlowBox" id="popover_flowbox">
-                                    <property name="homogeneous">true</property>
-                                    <property name="max-children-per-line">5</property>
-                                    <property name="min-children-per-line">4</property>
-                                    <property name="selection-mode">0</property>
-                                  </object>
-                                </child>
+                            <property name="child">
+                              <object class="GtkFlowBox" id="popover_flowbox">
+                                <property name="homogeneous">true</property>
+                                <property name="max-children-per-line">5</property>
+                                <property name="min-children-per-line">4</property>
+                                <property name="selection-mode">0</property>
                               </object>
-                            </child>
+                            </property>
                           </object>
                         </child>
                       </object>
-                    </child>
+                    </property>
+                    <style>
+                      <class name="flat"/>
+                    </style>
                   </object>
                 </child>
                 <child>
@@ -112,10 +123,10 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                   </object>
                 </child>
               </object>
-            </child>
+            </property>
           </object>
-        </child>
+        </property>
       </object>
-    </child>
+    </property>
   </template>
 </interface>

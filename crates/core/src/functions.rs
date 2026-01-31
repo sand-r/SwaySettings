@@ -65,7 +65,7 @@ pub fn check_settings_folder_exists(file_name: &str) -> anyhow::Result<gio::File
 
 pub fn write_settings(file_name: &str, lines: &[String]) -> anyhow::Result<()> {
     let file = check_settings_folder_exists(file_name)?;
-    let mut stream = gio::OutputStream::from(file.replace(
+    let stream = gio::OutputStream::from(file.replace(
         None::<&str>,
         false,
         gio::FileCreateFlags::REPLACE_DESTINATION,
@@ -149,23 +149,23 @@ pub fn set_gsetting(settings: &gio::Settings, name: &str, value: &Variant) -> Op
     match value.type_().as_str() {
         "i" => {
             let val = value.get::<i32>()?;
-            settings.set_int(name, val);
+            let _ = settings.set_int(name, val);
             Some(val.to_string())
         }
         "b" => {
             let val = value.get::<bool>()?;
-            settings.set_boolean(name, val);
+            let _ = settings.set_boolean(name, val);
             Some(val.to_string())
         }
         "s" => {
             let val = value.get::<String>()?;
-            settings.set_string(name, &val);
+            let _ = settings.set_string(name, &val);
             Some(val)
         }
         "as" => {
             let val = value.get::<Vec<String>>()?;
             let refs: Vec<&str> = val.iter().map(|s| s.as_str()).collect();
-            settings.set_strv(name, refs);
+            let _ = settings.set_strv(name, refs);
             Some(val.join(", "))
         }
         _ => None,
@@ -299,9 +299,19 @@ pub fn gdk_texture_scale(
     let scaled = pixbuf
         .scale_simple(new_width as i32, new_height as i32, gdk_pixbuf::InterpType::Bilinear)
         .unwrap_or(pixbuf);
-    let texture = gdk4::Texture::for_pixbuf(&scaled);
 
-    Some((texture, new_width, new_height))
+    let width = scaled.width();
+    let height = scaled.height();
+    let format = if scaled.has_alpha() {
+        gdk4::MemoryFormat::R8g8b8a8
+    } else {
+        gdk4::MemoryFormat::R8g8b8
+    };
+    let bytes = scaled.read_pixel_bytes();
+    let stride = scaled.rowstride() as usize;
+    let texture = gdk4::MemoryTexture::new(width, height, format, &bytes, stride);
+
+    Some((texture.upcast(), new_width, new_height))
 }
 
 pub fn set_wallpaper(file_path: &str, settings: &gio::Settings) -> bool {

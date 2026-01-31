@@ -1,3 +1,4 @@
+use gio::prelude::*;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{CompositeTemplate, TemplateChild};
@@ -37,8 +38,9 @@ impl AdwApplicationWindowImpl for LockerWindowImpl {}
 
 glib::wrapper! {
     pub struct LockerWindow(ObjectSubclass<LockerWindowImpl>)
-        @extends libadwaita::ApplicationWindow, gtk4::Window, gtk4::Widget,
-        @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
+        @extends libadwaita::ApplicationWindow, gtk4::ApplicationWindow, gtk4::Window, gtk4::Widget,
+        @implements gio::ActionGroup, gio::ActionMap, gtk4::Accessible, gtk4::Buildable,
+                    gtk4::ConstraintTarget, gtk4::Native, gtk4::Root, gtk4::ShortcutManager;
 }
 
 impl LockerWindow {

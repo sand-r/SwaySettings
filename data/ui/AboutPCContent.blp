@@ -2,132 +2,146 @@ using Gtk 4.0;
 using Adw 1;
 
 template $SwaySettingsAboutPCContent: Adw.Bin {
-  child: Gtk.Box {
-    orientation: vertical;
-    spacing: 24;
-    valign: start;
+  child: Gtk.ScrolledWindow {
+    hexpand: true;
+    vexpand: true;
 
-    Gtk.Box {
-      orientation: vertical;
-      spacing: 12;
-      halign: center;
-      margin-top: 12;
-      margin-bottom: 12;
+    child: Adw.Clamp {
+      maximum-size: 600;
+      tightening-threshold: 400;
+      margin-top: 16;
+      margin-bottom: 16;
+      margin-start: 16;
+      margin-end: 16;
 
-      Gtk.Image os_image {
-        pixel-size: 96;
-      }
+      child: Gtk.Box {
+        orientation: vertical;
+        spacing: 24;
+        valign: start;
 
-      Label os_name_label {
-        wrap: true;
-        justify: center;
+        Gtk.Box {
+          orientation: vertical;
+          spacing: 12;
+          halign: center;
+          margin-top: 12;
+          margin-bottom: 12;
 
-        styles [
-          "title-1"
-        ]
-      }
-    }
+          Gtk.Image os_image {
+            pixel-size: 96;
+          }
 
-    Adw.PreferencesGroup {
-      title: "System";
+          Label os_name_label {
+            wrap: true;
+            justify: center;
 
-      Adw.ActionRow os_version_row {
-        title: "Version";
-
-        [suffix]
-        Label os_version_label {
-          valign: center;
-
-          styles [
-            "dim-label"
-          ]
+            styles [
+              "title-1"
+            ]
+          }
         }
-      }
 
-      Adw.ActionRow kernel_row {
-        title: "Kernel";
+        Adw.PreferencesGroup {
+          title: "System";
 
-        [suffix]
-        Label kernel_label {
-          valign: center;
+          Adw.ActionRow os_version_row {
+            title: "Version";
 
-          styles [
-            "dim-label"
-          ]
+            [suffix]
+            Label os_version_label {
+              valign: center;
+
+              styles [
+                "dim-label"
+              ]
+            }
+          }
+
+          Adw.ActionRow kernel_row {
+            title: "Kernel";
+
+            [suffix]
+            Label kernel_label {
+              valign: center;
+
+              styles [
+                "dim-label"
+              ]
+            }
+          }
         }
-      }
-    }
 
-    Adw.PreferencesGroup {
-      title: "Hardware";
+        Adw.PreferencesGroup {
+          title: "Hardware";
 
-      Adw.ActionRow cpu_row {
-        title: "Processor";
+          Adw.ActionRow cpu_row {
+            title: "Processor";
 
-        [suffix]
-        Label cpu_label {
-          valign: center;
-          ellipsize: end;
-          xalign: 1.0;
+            [suffix]
+            Label cpu_label {
+              valign: center;
+              ellipsize: end;
+              xalign: 1.0;
 
-          styles [
-            "dim-label"
-          ]
+              styles [
+                "dim-label"
+              ]
+            }
+          }
+
+          Adw.ActionRow mem_row {
+            title: "Memory";
+
+            [suffix]
+            Label mem_label {
+              valign: center;
+
+              styles [
+                "dim-label"
+              ]
+            }
+          }
+
+          Adw.ActionRow graphics_row {
+            title: "Graphics";
+
+            [suffix]
+            Label graphics_label {
+              valign: center;
+              ellipsize: end;
+              xalign: 1.0;
+
+              styles [
+                "dim-label"
+              ]
+            }
+          }
         }
-      }
 
-      Adw.ActionRow mem_row {
-        title: "Memory";
+        Adw.PreferencesGroup storage_group {
+          title: "Storage";
 
-        [suffix]
-        Label mem_label {
-          valign: center;
+          Gtk.ListBox storage_list_box {
+            selection-mode: none;
 
-          styles [
-            "dim-label"
-          ]
+            styles [
+              "boxed-list"
+            ]
+          }
         }
-      }
 
-      Adw.ActionRow graphics_row {
-        title: "Graphics";
+        Adw.PreferencesGroup external_storage_group {
+          title: "External Storage";
+          visible: false;
 
-        [suffix]
-        Label graphics_label {
-          valign: center;
-          ellipsize: end;
-          xalign: 1.0;
+          Gtk.ListBox external_storage_list_box {
+            selection-mode: none;
 
-          styles [
-            "dim-label"
-          ]
+            styles [
+              "boxed-list"
+            ]
+          }
         }
-      }
-    }
-
-    Adw.PreferencesGroup storage_group {
-      title: "Storage";
-
-      Gtk.ListBox storage_list_box {
-        selection-mode: none;
-
-        styles [
-          "boxed-list"
-        ]
-      }
-    }
-
-    Adw.PreferencesGroup external_storage_group {
-      title: "External Storage";
-      visible: false;
-
-      Gtk.ListBox external_storage_list_box {
-        selection-mode: none;
-
-        styles [
-          "boxed-list"
-        ]
-      }
-    }
+      };
+    };
   };
 }

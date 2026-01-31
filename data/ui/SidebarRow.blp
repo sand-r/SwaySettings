@@ -1,0 +1,25 @@
+using Gtk 4.0;
+
+template $SwaySettingsSidebarRow: Gtk.ListBoxRow {
+  child: Gtk.Box {
+    orientation: horizontal;
+    spacing: 12;
+    margin-start: 8;
+    margin-end: 8;
+    margin-top: 8;
+    margin-bottom: 8;
+
+    Gtk.Image icon {
+      icon-size: normal;
+    }
+
+    Gtk.Label label {
+      hexpand: true;
+      xalign: 0;
+
+      styles [
+        "sidebar-item-label"
+      ]
+    }
+  };
+}

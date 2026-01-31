@@ -144,7 +144,7 @@ impl AboutPcContent {
         let logo = glib::os_info("LOGO")
             .map(|s| s.to_string())
             .unwrap_or_else(|| "item-missing-symbolic".to_string());
-        imp.os_image.set_from_icon_name(Some(&logo));
+        imp.os_image.set_icon_name(Some(&logo));
 
         let os_name = glib::os_info("NAME")
             .map(|s| s.to_string())
@@ -247,24 +247,7 @@ impl AboutPcContent {
 }
 
 pub fn build_page() -> gtk4::Widget {
-    let content = AboutPcContent::new();
-
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_hexpand(true);
-    scrolled.set_vexpand(true);
-
-    let clamp = libadwaita::Clamp::new();
-    clamp.set_maximum_size(600);
-    clamp.set_tightening_threshold(400);
-    clamp.set_margin_top(16);
-    clamp.set_margin_bottom(16);
-    clamp.set_margin_start(16);
-    clamp.set_margin_end(16);
-    clamp.set_child(Some(&content));
-
-    scrolled.set_child(Some(&clamp));
-
-    scrolled.upcast()
+    AboutPcContent::new().upcast()
 }
 
 fn gtk_ordering(order: std::cmp::Ordering) -> gtk4::Ordering {

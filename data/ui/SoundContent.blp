@@ -2,91 +2,111 @@ using Gtk 4.0;
 using Adw 1;
 
 template $SwaySettingsSoundContent: Adw.Bin {
-  child: Box {
-    spacing: 24;
-    orientation: vertical;
-    valign: start;
+  child: ScrolledWindow {
+    hscrollbar-policy: never;
+    vexpand: true;
 
-    Adw.PreferencesGroup output_group {
-      title: 'Output';
+    child: Adw.Clamp {
+      maximum-size: 600;
+      margin-top: 24;
+      margin-bottom: 24;
+      margin-start: 12;
+      margin-end: 12;
 
-      Adw.ComboRow output_device_row {
-        title: 'Output Device';
-      }
+      child: Box {
+        spacing: 24;
+        orientation: vertical;
 
-      Adw.ActionRow {
-        title: 'Volume';
+        Adw.PreferencesGroup {
+          title: "Output";
 
-        [suffix]
-        Box {
-          spacing: 8;
-          valign: center;
-
-          ToggleButton output_mute_toggle {
-            icon-name: 'audio-volume-high-symbolic';
-            valign: center;
-
-            styles [
-              "flat"
-            ]
+          Adw.ComboRow output_device_row {
+            title: "Output Device";
           }
 
-          Scale output_slider {
-            adjustment: Adjustment {
-              page-increment: 10.0;
-              step-increment: 1.0;
-              value: 0;
-              lower: 0;
-              upper: 150.0;
-            };
+          Adw.ActionRow {
+            title: "Volume";
 
-            digits: 0;
-            hexpand: true;
-            width-request: 200;
-          }
-        }
-      }
-    }
+            [suffix]
+            Box {
+              spacing: 12;
+              valign: center;
 
-    Adw.PreferencesGroup input_group {
-      title: 'Input';
+              Scale output_slider {
+                adjustment: Adjustment {
+                  page-increment: 10.0;
+                  step-increment: 1.0;
+                  value: 0;
+                  lower: 0;
+                  upper: 100.0;
+                };
 
-      Adw.ComboRow input_device_row {
-        title: 'Input Device';
-      }
+                draw-value: true;
+                value-pos: right;
+                digits: 0;
+                hexpand: true;
+                width-request: 200;
+              }
 
-      Adw.ActionRow {
-        title: 'Volume';
+              ToggleButton output_mute_toggle {
+                icon-name: "audio-volume-high-symbolic";
+                valign: center;
+                tooltip-text: "Mute";
 
-        [suffix]
-        Box {
-          spacing: 8;
-          valign: center;
-
-          ToggleButton input_mute_toggle {
-            icon-name: 'audio-input-microphone-symbolic';
-            valign: center;
-
-            styles [
-              "flat"
-            ]
-          }
-
-          Scale input_slider {
-            adjustment: Adjustment {
-              page-increment: 10.0;
-              step-increment: 1.0;
-              value: 0;
-              lower: 0;
-              upper: 150.0;
-            };
-
-            digits: 0;
-            hexpand: true;
-            width-request: 200;
+                styles [
+                  "flat",
+                  "circular"
+                ]
+              }
+            }
           }
         }
-      }
-    }
+
+        Adw.PreferencesGroup {
+          title: "Input";
+
+          Adw.ComboRow input_device_row {
+            title: "Input Device";
+          }
+
+          Adw.ActionRow {
+            title: "Volume";
+
+            [suffix]
+            Box {
+              spacing: 12;
+              valign: center;
+
+              Scale input_slider {
+                adjustment: Adjustment {
+                  page-increment: 10.0;
+                  step-increment: 1.0;
+                  value: 0;
+                  lower: 0;
+                  upper: 100.0;
+                };
+
+                draw-value: true;
+                value-pos: right;
+                digits: 0;
+                hexpand: true;
+                width-request: 200;
+              }
+
+              ToggleButton input_mute_toggle {
+                icon-name: "audio-input-microphone-symbolic";
+                valign: center;
+                tooltip-text: "Mute";
+
+                styles [
+                  "flat",
+                  "circular"
+                ]
+              }
+            }
+          }
+        }
+      };
+    };
   };
 }

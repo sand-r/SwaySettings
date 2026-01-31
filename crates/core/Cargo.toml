@@ -20,4 +20,5 @@ gtk4.workspace = true
 gdk-pixbuf.workspace = true
 
 [build-dependencies]
-glib-build-tools = "0.19"
+glib-build-tools = "0.22.0-alpha.2"
+grass = "0.13"

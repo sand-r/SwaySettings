@@ -6,7 +6,11 @@ use gio::prelude::*;
 use gtk4::prelude::*;
 
 mod pages;
-mod window;
+mod services;
+mod settings_window;
+mod sidebar_row;
+
+use settings_window::SettingsWindow;
 
 
 #[derive(Parser, Debug)]
@@ -66,7 +70,7 @@ fn main() {
     let page_value_clone = page_value.clone();
 
     app.connect_activate(move |app| {
-        let window_state = window::build_window(app, &settings_clone);
+        let window = SettingsWindow::new(app, &settings_clone);
 
         swaysettings_core::resources::load_css(
             "/org/erikreider/swaysettings/style/settings-window.css",
@@ -78,10 +82,10 @@ fn main() {
             icon_theme.add_resource_path("/org/erikreider/swaysettings/icons");
         }
 
-        window_state.window.present();
+        window.present();
 
         if let Some(page) = page_value_clone.borrow().clone() {
-            window_state.navigate_to_page(&page);
+            window.navigate_to_page(&page);
         }
     });
 

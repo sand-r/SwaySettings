@@ -1,11 +1,16 @@
+use glib::prelude::*;
 use gtk4::prelude::*;
 
 mod about_pc;
+mod bluetooth;
+mod sound;
 mod storage_row;
 mod users;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, glib::Enum)]
+#[enum_type(name = "SwaySettingsPageType")]
 pub enum PageType {
+    #[default]
     Users,
     AboutPc,
     Power,
@@ -101,6 +106,8 @@ pub fn create_placeholder(page: PageType) -> gtk4::Widget {
 pub fn create_page(page: PageType) -> gtk4::Widget {
     match page {
         PageType::AboutPc => about_pc::build_page(),
+        PageType::Bluetooth => bluetooth::build_page(),
+        PageType::Sound => sound::build_page(),
         PageType::Users => users::build_page(),
         _ => create_placeholder(page),
     }

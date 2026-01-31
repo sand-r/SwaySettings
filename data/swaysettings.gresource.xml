@@ -17,6 +17,8 @@
       <file preprocess="xml-stripblanks">icons/scalable/actions/warning-outline-symbolic.svg</file>
       <file preprocess="xml-stripblanks">icons/scalable/actions/thermometer-symbolic.svg</file>
 
+      <file>ui/SidebarRow.ui</file>
+      <file>ui/SettingsWindow.ui</file>
       <file>ui/OrderListSelector.ui</file>
       <file>ui/KeyboardInputSelector.ui</file>
       <file>ui/AboutPCContent.ui</file>
@@ -25,6 +27,7 @@
       <file>ui/Users.ui</file>
       <file>ui/UserListItem.ui</file>
       <file>ui/SoundContent.ui</file>
+      <file>ui/BluetoothContent.ui</file>
       <file>ui/BluetoothDeviceRow.ui</file>
       <file>ui/ScreenshotList.ui</file>
       <file>ui/ScreenshotPreview.ui</file>

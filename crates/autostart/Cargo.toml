@@ -9,4 +9,5 @@ anyhow.workspace = true
 
 glib.workspace = true
 gio.workspace = true
+gio-unix.workspace = true
 

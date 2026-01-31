@@ -97,7 +97,7 @@ impl StorageRow {
         let row: StorageRow = glib::Object::builder().build();
         let imp = row.imp();
 
-        imp.icon.set_from_icon_name(Some(&data.icon));
+        imp.icon.set_icon_name(Some(&data.icon));
         imp.type_label.set_text(&data.type_label);
         imp.name_label.set_text(&data.name_label);
         imp.size_label.set_text(&data.size_label);
