@@ -12,110 +12,86 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
         <property name="hscrollbar-policy">2</property>
         <property name="vexpand">true</property>
         <property name="child">
-          <object class="AdwClamp">
-            <property name="maximum-size">600</property>
-            <property name="margin-top">24</property>
-            <property name="margin-bottom">24</property>
-            <property name="margin-start">12</property>
-            <property name="margin-end">12</property>
-            <property name="child">
-              <object class="GtkBox">
-                <property name="spacing">24</property>
-                <property name="orientation">1</property>
-                <child>
-                  <object class="AdwPreferencesGroup">
-                    <property name="title">Output</property>
+          <object class="AdwPreferencesPage">
+            <child>
+              <object class="AdwPreferencesGroup" id="output_group">
+                <property name="title">Output</property>
+                <property name="header-suffix">
+                  <object class="GtkBox">
+                    <property name="spacing">12</property>
                     <child>
-                      <object class="AdwComboRow" id="output_device_row">
-                        <property name="title">Output Device</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwActionRow">
-                        <property name="title">Volume</property>
-                        <child type="suffix">
-                          <object class="GtkBox">
-                            <property name="spacing">12</property>
-                            <property name="valign">3</property>
-                            <child>
-                              <object class="GtkScale" id="output_slider">
-                                <property name="adjustment">
-                                  <object class="GtkAdjustment">
-                                    <property name="page-increment">10</property>
-                                    <property name="step-increment">1</property>
-                                    <property name="value">0</property>
-                                    <property name="lower">0</property>
-                                    <property name="upper">100</property>
-                                  </object>
-                                </property>
-                                <property name="draw-value">true</property>
-                                <property name="value-pos">1</property>
-                                <property name="digits">0</property>
-                                <property name="hexpand">true</property>
-                                <property name="width-request">200</property>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkToggleButton" id="output_mute_toggle">
-                                <property name="icon-name">audio-volume-high-symbolic</property>
-                                <property name="valign">3</property>
-                                <property name="tooltip-text">Mute</property>
-                                <style>
-                                  <class name="flat"/>
-                                  <class name="circular"/>
-                                </style>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
+                      <object class="GtkLevelBar" id="output_level_bar">
+                        <property name="valign">3</property>
+                        <property name="width-request">100</property>
+                        <property name="min-value">0</property>
+                        <property name="max-value">1</property>
+                        <property name="mode">0</property>
+                        <style>
+                          <class name="audio-level"/>
+                        </style>
                       </object>
                     </child>
                   </object>
+                </property>
+                <child>
+                  <object class="AdwComboRow" id="output_device_row">
+                    <property name="title">Output Device</property>
+                    <property name="use-underline">true</property>
+                  </object>
                 </child>
                 <child>
-                  <object class="AdwPreferencesGroup">
-                    <property name="title">Input</property>
+                  <object class="AdwPreferencesRow">
+                    <property name="activatable">false</property>
                     <child>
-                      <object class="AdwComboRow" id="input_device_row">
-                        <property name="title">Input Device</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwActionRow">
-                        <property name="title">Volume</property>
-                        <child type="suffix">
-                          <object class="GtkBox">
-                            <property name="spacing">12</property>
+                      <object class="GtkBox">
+                        <property name="margin-top">12</property>
+                        <property name="margin-bottom">12</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="spacing">12</property>
+                        <child>
+                          <object class="GtkLabel" id="output_volume_label">
+                            <property name="xalign">0</property>
+                            <property name="label">Volume</property>
+                            <property name="width-chars">8</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkToggleButton" id="output_mute_toggle">
+                            <property name="icon-name">audio-volume-high-symbolic</property>
                             <property name="valign">3</property>
-                            <child>
-                              <object class="GtkScale" id="input_slider">
-                                <property name="adjustment">
-                                  <object class="GtkAdjustment">
-                                    <property name="page-increment">10</property>
-                                    <property name="step-increment">1</property>
-                                    <property name="value">0</property>
-                                    <property name="lower">0</property>
-                                    <property name="upper">100</property>
-                                  </object>
-                                </property>
-                                <property name="draw-value">true</property>
-                                <property name="value-pos">1</property>
-                                <property name="digits">0</property>
-                                <property name="hexpand">true</property>
-                                <property name="width-request">200</property>
+                            <property name="tooltip-text">Mute</property>
+                            <style>
+                              <class name="flat"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkScale" id="output_slider">
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="page-increment">10</property>
+                                <property name="step-increment">1</property>
+                                <property name="value">0</property>
+                                <property name="lower">0</property>
+                                <property name="upper">100</property>
                               </object>
-                            </child>
-                            <child>
-                              <object class="GtkToggleButton" id="input_mute_toggle">
-                                <property name="icon-name">audio-input-microphone-symbolic</property>
-                                <property name="valign">3</property>
-                                <property name="tooltip-text">Mute</property>
-                                <style>
-                                  <class name="flat"/>
-                                  <class name="circular"/>
-                                </style>
-                              </object>
-                            </child>
+                            </property>
+                            <property name="hexpand">true</property>
+                            <property name="draw-value">false</property>
+                            <marks>
+                              <mark value="100" position="bottom"></mark>
+                            </marks>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="output_volume_value">
+                            <property name="width-chars">4</property>
+                            <property name="xalign">1</property>
+                            <property name="label">0%</property>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
                           </object>
                         </child>
                       </object>
@@ -123,10 +99,135 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                   </object>
                 </child>
               </object>
-            </property>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="output_no_devices_group">
+                <property name="title">Output</property>
+                <property name="visible">false</property>
+                <child>
+                  <object class="AdwActionRow">
+                    <property name="title">Output Device</property>
+                    <property name="subtitle">No output devices available</property>
+                    <property name="activatable">false</property>
+                    <child type="prefix">
+                      <object class="GtkImage">
+                        <property name="icon-name">audio-speakers-symbolic</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="input_group">
+                <property name="title">Input</property>
+                <property name="header-suffix">
+                  <object class="GtkLevelBar" id="input_level_bar">
+                    <property name="valign">3</property>
+                    <property name="width-request">100</property>
+                    <property name="min-value">0</property>
+                    <property name="max-value">1</property>
+                    <property name="mode">0</property>
+                    <style>
+                      <class name="audio-level"/>
+                    </style>
+                  </object>
+                </property>
+                <child>
+                  <object class="AdwComboRow" id="input_device_row">
+                    <property name="title">Input Device</property>
+                    <property name="use-underline">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesRow">
+                    <property name="activatable">false</property>
+                    <child>
+                      <object class="GtkBox">
+                        <property name="margin-top">12</property>
+                        <property name="margin-bottom">12</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="spacing">12</property>
+                        <child>
+                          <object class="GtkLabel" id="input_volume_label">
+                            <property name="xalign">0</property>
+                            <property name="label">Volume</property>
+                            <property name="width-chars">8</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkToggleButton" id="input_mute_toggle">
+                            <property name="icon-name">audio-input-microphone-symbolic</property>
+                            <property name="valign">3</property>
+                            <property name="tooltip-text">Mute</property>
+                            <style>
+                              <class name="flat"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkScale" id="input_slider">
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="page-increment">10</property>
+                                <property name="step-increment">1</property>
+                                <property name="value">0</property>
+                                <property name="lower">0</property>
+                                <property name="upper">100</property>
+                              </object>
+                            </property>
+                            <property name="hexpand">true</property>
+                            <property name="draw-value">false</property>
+                            <marks>
+                              <mark value="100" position="bottom"></mark>
+                            </marks>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="input_volume_value">
+                            <property name="width-chars">4</property>
+                            <property name="xalign">1</property>
+                            <property name="label">0%</property>
+                            <style>
+                              <class name="dim-label"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="input_no_devices_group">
+                <property name="title">Input</property>
+                <property name="visible">false</property>
+                <child>
+                  <object class="AdwActionRow">
+                    <property name="title">Input Device</property>
+                    <property name="subtitle">No input devices available</property>
+                    <property name="activatable">false</property>
+                    <child type="prefix">
+                      <object class="GtkImage">
+                        <property name="icon-name">audio-input-microphone-symbolic</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
           </object>
         </property>
       </object>
     </property>
   </template>
+  <object class="GtkSizeGroup">
+    <property name="mode">1</property>
+    <widgets>
+      <widget name="output_volume_label"/>
+      <widget name="input_volume_label"/>
+    </widgets>
+  </object>
 </interface>

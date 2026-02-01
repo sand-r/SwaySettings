@@ -20,6 +20,11 @@ mod imp {
     #[derive(CompositeTemplate)]
     #[template(resource = "/org/erikreider/swaysettings/ui/SoundContent.ui")]
     pub struct SoundContent {
+        // Output widgets
+        #[template_child]
+        pub output_group: TemplateChild<libadwaita::PreferencesGroup>,
+        #[template_child]
+        pub output_no_devices_group: TemplateChild<libadwaita::PreferencesGroup>,
         #[template_child]
         pub output_device_row: TemplateChild<libadwaita::ComboRow>,
         #[template_child]
@@ -27,11 +32,25 @@ mod imp {
         #[template_child]
         pub output_mute_toggle: TemplateChild<gtk4::ToggleButton>,
         #[template_child]
+        pub output_volume_value: TemplateChild<gtk4::Label>,
+        #[template_child]
+        pub output_level_bar: TemplateChild<gtk4::LevelBar>,
+
+        // Input widgets
+        #[template_child]
+        pub input_group: TemplateChild<libadwaita::PreferencesGroup>,
+        #[template_child]
+        pub input_no_devices_group: TemplateChild<libadwaita::PreferencesGroup>,
+        #[template_child]
         pub input_device_row: TemplateChild<libadwaita::ComboRow>,
         #[template_child]
         pub input_slider: TemplateChild<gtk4::Scale>,
         #[template_child]
         pub input_mute_toggle: TemplateChild<gtk4::ToggleButton>,
+        #[template_child]
+        pub input_volume_value: TemplateChild<gtk4::Label>,
+        #[template_child]
+        pub input_level_bar: TemplateChild<gtk4::LevelBar>,
 
         pub sinks: RefCell<gio::ListStore>,
         pub sources: RefCell<gio::ListStore>,
@@ -42,12 +61,20 @@ mod imp {
     impl Default for SoundContent {
         fn default() -> Self {
             Self {
+                output_group: TemplateChild::default(),
+                output_no_devices_group: TemplateChild::default(),
                 output_device_row: TemplateChild::default(),
                 output_slider: TemplateChild::default(),
                 output_mute_toggle: TemplateChild::default(),
+                output_volume_value: TemplateChild::default(),
+                output_level_bar: TemplateChild::default(),
+                input_group: TemplateChild::default(),
+                input_no_devices_group: TemplateChild::default(),
                 input_device_row: TemplateChild::default(),
                 input_slider: TemplateChild::default(),
                 input_mute_toggle: TemplateChild::default(),
+                input_volume_value: TemplateChild::default(),
+                input_level_bar: TemplateChild::default(),
                 sinks: RefCell::new(gio::ListStore::new::<AudioDevice>()),
                 sources: RefCell::new(gio::ListStore::new::<AudioDevice>()),
                 daemon: RefCell::new(None),
@@ -182,13 +209,17 @@ impl SoundContent {
             self,
             move |slider| {
                 let imp = this.imp();
+
+                // Always update the volume label
+                this.update_output_volume_label(slider.value());
+
                 if imp.updating_ui.get() {
                     return;
                 }
 
                 if let Some(daemon) = imp.daemon.borrow().as_ref() {
                     if let Some(device) = this.get_selected_output() {
-                        // Convert from UI scale (0-150) to linear (0-1.5)
+                        // Convert from UI scale (0-100) to linear (0-1.0)
                         let ui_volume = slider.value() / 100.0;
                         let linear_volume = cubic_to_linear(ui_volume);
                         daemon.set_volume(device.id(), linear_volume);
@@ -251,6 +282,10 @@ impl SoundContent {
             self,
             move |slider| {
                 let imp = this.imp();
+
+                // Always update the volume label
+                this.update_input_volume_label(slider.value());
+
                 if imp.updating_ui.get() {
                     return;
                 }
@@ -371,6 +406,10 @@ impl SoundContent {
                 let sinks = imp.sinks.borrow();
                 sinks.append(&device);
 
+                // Show output group, hide no-devices placeholder
+                imp.output_group.set_visible(true);
+                imp.output_no_devices_group.set_visible(false);
+
                 // Select first device if none selected, but don't update controls yet
                 // (wait for DeviceChanged with actual volume from PipeWire)
                 if imp.output_device_row.selected() == gtk4::INVALID_LIST_POSITION {
@@ -382,6 +421,10 @@ impl SoundContent {
             DeviceType::Source => {
                 let sources = imp.sources.borrow();
                 sources.append(&device);
+
+                // Show input group, hide no-devices placeholder
+                imp.input_group.set_visible(true);
+                imp.input_no_devices_group.set_visible(false);
 
                 if imp.input_device_row.selected() == gtk4::INVALID_LIST_POSITION {
                     imp.updating_ui.set(true);
@@ -400,6 +443,12 @@ impl SoundContent {
             let sinks = imp.sinks.borrow();
             if let Some(pos) = self.find_device_position(&sinks, id) {
                 sinks.remove(pos);
+
+                // Show no-devices placeholder if empty
+                if sinks.n_items() == 0 {
+                    imp.output_group.set_visible(false);
+                    imp.output_no_devices_group.set_visible(true);
+                }
                 return;
             }
         }
@@ -409,6 +458,12 @@ impl SoundContent {
             let sources = imp.sources.borrow();
             if let Some(pos) = self.find_device_position(&sources, id) {
                 sources.remove(pos);
+
+                // Show no-devices placeholder if empty
+                if sources.n_items() == 0 {
+                    imp.input_group.set_visible(false);
+                    imp.input_no_devices_group.set_visible(true);
+                }
             }
         }
     }
@@ -516,6 +571,9 @@ impl SoundContent {
             imp.output_slider.set_value(ui_volume);
         }
 
+        // Update volume label
+        self.update_output_volume_label(ui_volume);
+
         if imp.output_mute_toggle.is_active() != device.is_muted() {
             imp.output_mute_toggle.set_active(device.is_muted());
         }
@@ -532,10 +590,23 @@ impl SoundContent {
             imp.input_slider.set_value(ui_volume);
         }
 
+        // Update volume label
+        self.update_input_volume_label(ui_volume);
+
         if imp.input_mute_toggle.is_active() != device.is_muted() {
             imp.input_mute_toggle.set_active(device.is_muted());
         }
         self.update_input_mute_icon();
+    }
+
+    fn update_output_volume_label(&self, volume: f64) {
+        let imp = self.imp();
+        imp.output_volume_value.set_label(&format!("{}%", volume.round() as i32));
+    }
+
+    fn update_input_volume_label(&self, volume: f64) {
+        let imp = self.imp();
+        imp.input_volume_value.set_label(&format!("{}%", volume.round() as i32));
     }
 
     fn update_output_mute_icon(&self) {

@@ -6,107 +6,207 @@ template $SwaySettingsSoundContent: Adw.Bin {
     hscrollbar-policy: never;
     vexpand: true;
 
-    child: Adw.Clamp {
-      maximum-size: 600;
-      margin-top: 24;
-      margin-bottom: 24;
-      margin-start: 12;
-      margin-end: 12;
+    child: Adw.PreferencesPage {
+      // Output section with devices
+      Adw.PreferencesGroup output_group {
+        title: "Output";
 
-      child: Box {
-        spacing: 24;
-        orientation: vertical;
+        header-suffix: Box {
+          spacing: 12;
 
-        Adw.PreferencesGroup {
-          title: "Output";
+          LevelBar output_level_bar {
+            valign: center;
+            width-request: 100;
+            min-value: 0;
+            max-value: 1;
+            mode: continuous;
 
-          Adw.ComboRow output_device_row {
-            title: "Output Device";
+            styles [
+              "audio-level"
+            ]
           }
+        };
 
-          Adw.ActionRow {
-            title: "Volume";
+        Adw.ComboRow output_device_row {
+          title: "Output Device";
+          use-underline: true;
+        }
 
-            [suffix]
-            Box {
-              spacing: 12;
+        Adw.PreferencesRow {
+          activatable: false;
+
+          Box {
+            margin-top: 12;
+            margin-bottom: 12;
+            margin-start: 12;
+            margin-end: 12;
+            spacing: 12;
+
+            Label output_volume_label {
+              xalign: 0;
+              label: "Volume";
+              width-chars: 8;
+            }
+
+            ToggleButton output_mute_toggle {
+              icon-name: "audio-volume-high-symbolic";
               valign: center;
+              tooltip-text: "Mute";
 
-              Scale output_slider {
-                adjustment: Adjustment {
-                  page-increment: 10.0;
-                  step-increment: 1.0;
-                  value: 0;
-                  lower: 0;
-                  upper: 100.0;
-                };
+              styles [
+                "flat",
+              ]
+            }
 
-                draw-value: true;
-                value-pos: right;
-                digits: 0;
-                hexpand: true;
-                width-request: 200;
-              }
+            Scale output_slider {
+              adjustment: Adjustment {
+                page-increment: 10.0;
+                step-increment: 1.0;
+                value: 0;
+                lower: 0;
+                upper: 100.0;
+              };
 
-              ToggleButton output_mute_toggle {
-                icon-name: "audio-volume-high-symbolic";
-                valign: center;
-                tooltip-text: "Mute";
+              hexpand: true;
+              draw-value: false;
 
-                styles [
-                  "flat",
-                  "circular"
-                ]
-              }
+              marks [
+                mark (100, bottom)
+              ]
+            }
+
+            Label output_volume_value {
+              width-chars: 4;
+              xalign: 1;
+              label: "0%";
+
+              styles [
+                "dim-label"
+              ]
             }
           }
         }
+      }
 
-        Adw.PreferencesGroup {
-          title: "Input";
+      // Output section when no devices
+      Adw.PreferencesGroup output_no_devices_group {
+        title: "Output";
+        visible: false;
 
-          Adw.ComboRow input_device_row {
-            title: "Input Device";
+        Adw.ActionRow {
+          title: "Output Device";
+          subtitle: "No output devices available";
+          activatable: false;
+
+          [prefix]
+          Image {
+            icon-name: "audio-speakers-symbolic";
           }
+        }
+      }
 
-          Adw.ActionRow {
-            title: "Volume";
+      // Input section with devices
+      Adw.PreferencesGroup input_group {
+        title: "Input";
 
-            [suffix]
-            Box {
-              spacing: 12;
+        header-suffix: LevelBar input_level_bar {
+          valign: center;
+          width-request: 100;
+          min-value: 0;
+          max-value: 1;
+          mode: continuous;
+
+          styles [
+            "audio-level"
+          ]
+        };
+
+        Adw.ComboRow input_device_row {
+          title: "Input Device";
+          use-underline: true;
+        }
+
+        Adw.PreferencesRow {
+          activatable: false;
+
+          Box {
+            margin-top: 12;
+            margin-bottom: 12;
+            margin-start: 12;
+            margin-end: 12;
+            spacing: 12;
+
+            Label input_volume_label {
+              xalign: 0;
+              label: "Volume";
+              width-chars: 8;
+            }
+
+            ToggleButton input_mute_toggle {
+              icon-name: "audio-input-microphone-symbolic";
               valign: center;
+              tooltip-text: "Mute";
 
-              Scale input_slider {
-                adjustment: Adjustment {
-                  page-increment: 10.0;
-                  step-increment: 1.0;
-                  value: 0;
-                  lower: 0;
-                  upper: 100.0;
-                };
+              styles [
+                "flat",
+              ]
+            }
 
-                draw-value: true;
-                value-pos: right;
-                digits: 0;
-                hexpand: true;
-                width-request: 200;
-              }
+            Scale input_slider {
+              adjustment: Adjustment {
+                page-increment: 10.0;
+                step-increment: 1.0;
+                value: 0;
+                lower: 0;
+                upper: 100.0;
+              };
 
-              ToggleButton input_mute_toggle {
-                icon-name: "audio-input-microphone-symbolic";
-                valign: center;
-                tooltip-text: "Mute";
+              hexpand: true;
+              draw-value: false;
 
-                styles [
-                  "flat",
-                  "circular"
-                ]
-              }
+              marks [
+                mark (100, bottom)
+              ]
+            }
+
+            Label input_volume_value {
+              width-chars: 4;
+              xalign: 1;
+              label: "0%";
+
+              styles [
+                "dim-label"
+              ]
             }
           }
         }
-      };
+      }
+
+      // Input section when no devices
+      Adw.PreferencesGroup input_no_devices_group {
+        title: "Input";
+        visible: false;
+
+        Adw.ActionRow {
+          title: "Input Device";
+          subtitle: "No input devices available";
+          activatable: false;
+
+          [prefix]
+          Image {
+            icon-name: "audio-input-microphone-symbolic";
+          }
+        }
+      }
     };
   };
+}
+
+SizeGroup {
+  mode: horizontal;
+
+  widgets [
+    output_volume_label,
+    input_volume_label,
+  ]
 }
