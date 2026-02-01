@@ -75,9 +75,6 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                             </property>
                             <property name="hexpand">true</property>
                             <property name="draw-value">false</property>
-                            <marks>
-                              <mark value="100" position="bottom"></mark>
-                            </marks>
                           </object>
                         </child>
                       </object>
@@ -166,9 +163,6 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                             </property>
                             <property name="hexpand">true</property>
                             <property name="draw-value">false</property>
-                            <marks>
-                              <mark value="100" position="bottom"></mark>
-                            </marks>
                           </object>
                         </child>
                       </object>

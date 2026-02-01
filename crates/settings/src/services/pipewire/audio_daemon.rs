@@ -52,6 +52,7 @@ pub struct DeviceInfo {
     pub id: u32,
     pub name: String,
     pub description: String,
+    pub icon_name: Option<String>,
     pub volume: f64,
     pub is_muted: bool,
     pub is_default: bool,
@@ -571,6 +572,9 @@ fn handle_node_added<F>(
         _ => name.clone(),
     };
 
+    // Get icon name from PipeWire (e.g., "audio-speakers", "audio-headphones", "video-display")
+    let icon_name = props.get("device.icon_name").map(|s| s.to_string());
+
     // Log all properties to understand what PipeWire provides
     log::debug!("Node {} properties:", name);
     for (key, value) in props.iter() {
@@ -626,6 +630,7 @@ fn handle_node_added<F>(
         id,
         name: name.clone(),
         description,
+        icon_name,
         volume: 1.0,
         is_muted: false,
         is_default,

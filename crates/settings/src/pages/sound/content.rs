@@ -136,20 +136,55 @@ impl SoundContent {
     }
 
     fn setup_combo_row(&self, row: &libadwaita::ComboRow, model: &gio::ListStore) {
-        // Create expression to get description from AudioDevice
-        let expression = gtk4::PropertyExpression::new(
-            AudioDevice::static_type(),
-            gtk4::Expression::NONE,
-            "description",
-        );
-
         row.set_model(Some(model));
-        row.set_expression(Some(expression));
 
-        // Create a custom factory for the dropdown that shows device icon + text + checkmark
-        let factory = gtk4::SignalListItemFactory::new();
+        // Factory for the selected item display (collapsed row) - icon + full text
+        let selected_factory = gtk4::SignalListItemFactory::new();
 
-        factory.connect_setup(|_, list_item| {
+        selected_factory.connect_setup(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+
+            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+
+            // Device icon
+            let device_icon = gtk4::Image::new();
+            hbox.append(&device_icon);
+
+            // Label - no ellipsize for selected item
+            let label = gtk4::Label::new(None);
+            label.set_xalign(0.0);
+            label.set_valign(gtk4::Align::Center);
+            hbox.append(&label);
+
+            list_item.set_child(Some(&hbox));
+        });
+
+        selected_factory.connect_bind(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+            let item = list_item.item().and_downcast::<AudioDevice>();
+            let hbox = list_item.child().and_downcast::<gtk4::Box>();
+
+            if let (Some(device), Some(hbox)) = (item, hbox) {
+                let device_icon = hbox.first_child().and_downcast::<gtk4::Image>();
+                let label = hbox.last_child().and_downcast::<gtk4::Label>();
+
+                if let Some(device_icon) = device_icon {
+                    let icon_name = get_device_icon(&device);
+                    device_icon.set_icon_name(Some(&icon_name));
+                }
+
+                if let Some(label) = label {
+                    label.set_label(&device.description());
+                }
+            }
+        });
+
+        row.set_factory(Some(&selected_factory));
+
+        // Factory for dropdown items - icon + text + checkmark
+        let list_factory = gtk4::SignalListItemFactory::new();
+
+        list_factory.connect_setup(|_, list_item| {
             let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
 
             let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
@@ -164,12 +199,12 @@ impl SoundContent {
             let label = gtk4::Label::new(None);
             label.set_xalign(0.0);
             label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-            label.set_width_chars(1); // Allow shrinking
+            label.set_width_chars(1);
             label.set_valign(gtk4::Align::Center);
             label.set_hexpand(true);
             hbox.append(&label);
 
-            // Checkmark icon for selected item (initially hidden)
+            // Checkmark icon for selected item
             let checkmark = gtk4::Image::from_icon_name("object-select-symbolic");
             checkmark.set_opacity(0.0);
             hbox.append(&checkmark);
@@ -178,13 +213,12 @@ impl SoundContent {
         });
 
         let row_weak = row.downgrade();
-        factory.connect_bind(move |_, list_item| {
+        list_factory.connect_bind(move |_, list_item| {
             let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
             let item = list_item.item().and_downcast::<AudioDevice>();
             let hbox = list_item.child().and_downcast::<gtk4::Box>();
 
             if let (Some(device), Some(hbox)) = (item, hbox) {
-                // Get widgets from hbox
                 let device_icon = hbox.first_child().and_downcast::<gtk4::Image>();
                 let label = device_icon
                     .as_ref()
@@ -195,7 +229,7 @@ impl SoundContent {
                 // Set device icon
                 if let Some(device_icon) = device_icon {
                     let icon_name = get_device_icon(&device);
-                    device_icon.set_icon_name(Some(icon_name));
+                    device_icon.set_icon_name(Some(&icon_name));
                 }
 
                 // Set label
@@ -203,22 +237,25 @@ impl SoundContent {
                     label.set_label(&device.description());
                 }
 
-                // Show checkmark if this is the selected item
-                if let (Some(checkmark), Some(row)) = (checkmark, row_weak.upgrade()) {
-                    let is_selected = row.selected_item().as_ref()
-                        == list_item.item().as_ref();
-                    checkmark.set_opacity(if is_selected { 1.0 } else { 0.0 });
+                // Handle checkmark
+                if let (Some(checkmark), Some(row)) = (checkmark.clone(), row_weak.upgrade()) {
+                    // Update checkmark on selection change
+                    let list_item_for_notify = list_item.clone();
+                    let checkmark_for_notify = checkmark.clone();
+                    row.connect_selected_item_notify(move |row| {
+                        let is_selected = row.selected_item().as_ref()
+                            == list_item_for_notify.item().as_ref();
+                        checkmark_for_notify.set_opacity(if is_selected { 1.0 } else { 0.0 });
+                    });
 
-                    // Check if we're in the popover (checkmark only visible there)
-                    let in_popover = checkmark
-                        .ancestor(gtk4::Popover::static_type())
-                        .is_some();
-                    checkmark.set_visible(in_popover);
+                    // Initial checkmark state
+                    let is_selected = row.selected_item().as_ref() == list_item.item().as_ref();
+                    checkmark.set_opacity(if is_selected { 1.0 } else { 0.0 });
                 }
             }
         });
 
-        row.set_list_factory(Some(&factory));
+        row.set_list_factory(Some(&list_factory));
     }
 
     fn connect_output_controls(&self) {
@@ -720,32 +757,43 @@ impl Default for SoundContent {
     }
 }
 
-/// Get an appropriate icon name for an audio device based on its name/description
-fn get_device_icon(device: &AudioDevice) -> &'static str {
+/// Get the icon name for an audio device
+/// Uses PipeWire's device.icon_name if available, otherwise falls back to heuristics
+fn get_device_icon(device: &AudioDevice) -> String {
+    // First try PipeWire's icon
+    if let Some(icon) = device.icon_name() {
+        return format!("{}-symbolic", icon);
+    }
+
+    // Fallback based on device name/description
     let desc = device.description().to_lowercase();
     let name = device.name().to_lowercase();
 
     // Check for specific device types
     if desc.contains("headphone") || name.contains("headphone") {
-        return "audio-headphones-symbolic";
+        return "audio-headphones-symbolic".to_string();
     }
     if desc.contains("headset") || name.contains("headset") {
-        return "audio-headset-symbolic";
+        return "audio-headset-symbolic".to_string();
     }
     if desc.contains("hdmi") || name.contains("hdmi") || desc.contains("displayport") {
-        return "video-display-symbolic";
+        return "video-display-symbolic".to_string();
     }
     if desc.contains("bluetooth") || name.contains("bluez") {
-        return "bluetooth-symbolic";
+        return "bluetooth-symbolic".to_string();
     }
     if desc.contains("usb") || name.contains("usb") {
-        return "audio-card-symbolic";
+        return "audio-card-symbolic".to_string();
+    }
+    // Virtual/filter output devices get a different icon
+    if device.is_sink() && (name.contains("effect") || name.contains("filter") || desc.contains("virtual")) {
+        return "audio-card-symbolic".to_string();
     }
 
     // Default based on device type (sink vs source)
     if device.is_sink() {
-        "audio-speakers-symbolic"
+        "audio-speakers-symbolic".to_string()
     } else {
-        "audio-input-microphone-symbolic"
+        "audio-input-microphone-symbolic".to_string()
     }
 }

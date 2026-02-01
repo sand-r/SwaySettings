@@ -22,6 +22,9 @@ mod imp {
         pub description: RefCell<String>,
 
         #[property(get, set)]
+        pub icon_name: RefCell<Option<String>>,
+
+        #[property(get, set)]
         pub volume: Cell<f64>,
 
         #[property(get, set)]
@@ -66,6 +69,7 @@ impl AudioDevice {
             .property("id", info.id)
             .property("name", &info.name)
             .property("description", &info.description)
+            .property("icon-name", &info.icon_name)
             .property("volume", info.volume)
             .property("is-muted", info.is_muted)
             .property("is-default", info.is_default)
