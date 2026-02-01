@@ -9,6 +9,7 @@ use pipewire as pw;
 use pipewire::context::ContextRc;
 use pipewire::main_loop::MainLoopRc;
 use pipewire::metadata::Metadata;
+use pipewire::properties::properties;
 use pipewire::registry::GlobalObject;
 use pipewire::spa::param::ParamType;
 use pipewire::spa::pod::deserialize::PodDeserializer;
@@ -25,6 +26,8 @@ use pipewire::spa::sys::{
     // Direction values
     SPA_DIRECTION_INPUT, SPA_DIRECTION_OUTPUT,
 };
+use pipewire::spa::utils::Direction;
+use pipewire::stream::{StreamBox, StreamFlags, StreamListener};
 use pipewire::types::ObjectType;
 
 /// Type of audio device
@@ -63,6 +66,8 @@ pub enum AudioEvent {
     DeviceRemoved(u32),
     DeviceChanged(DeviceInfo),
     DefaultChanged(DeviceType, Option<u32>),
+    /// Peak level update (device_type, level 0.0-1.0)
+    PeakLevel(DeviceType, f32),
     Error(String),
 }
 
@@ -176,6 +181,177 @@ struct PwDeviceState {
     _listener: pipewire::device::DeviceListener,
 }
 
+/// State for peak level monitoring stream
+struct PeakMonitorState<F: Fn(AudioEvent) + 'static> {
+    #[allow(dead_code)]
+    stream: StreamBox<'static>,
+    #[allow(dead_code)]
+    listener: StreamListener<PeakUserData<F>>,
+}
+
+/// User data for peak monitoring callback
+struct PeakUserData<F: Fn(AudioEvent) + 'static> {
+    device_type: DeviceType,
+    event_callback: Rc<F>,
+}
+
+/// Create a peak monitoring stream for a device type
+fn create_peak_monitor<F>(
+    core: &'static pipewire::core::CoreRc,
+    device_type: DeviceType,
+    event_callback: Rc<F>,
+) -> Option<PeakMonitorState<F>>
+where
+    F: Fn(AudioEvent) + 'static,
+{
+    let stream_name = match device_type {
+        DeviceType::Sink => "output-peak-detect",
+        DeviceType::Source => "input-peak-detect",
+    };
+
+    // Create stream properties for peak detection
+    // For sinks, we use stream.capture.sink=true to capture from the sink's monitor
+    let props = match device_type {
+        DeviceType::Sink => properties! {
+            *pw::keys::MEDIA_TYPE => "Audio",
+            *pw::keys::MEDIA_CATEGORY => "Capture",
+            *pw::keys::MEDIA_ROLE => "DSP",
+            *pw::keys::NODE_NAME => stream_name,
+            // Capture from sink's monitor (what's being played)
+            "stream.capture.sink" => "true",
+            // Use peak detection instead of actual audio
+            "resample.peaks" => "true",
+            // Don't show in volume controls
+            "stream.monitor" => "true",
+        },
+        DeviceType::Source => properties! {
+            *pw::keys::MEDIA_TYPE => "Audio",
+            *pw::keys::MEDIA_CATEGORY => "Capture",
+            *pw::keys::MEDIA_ROLE => "DSP",
+            *pw::keys::NODE_NAME => stream_name,
+            // Use peak detection instead of actual audio
+            "resample.peaks" => "true",
+            // Don't show in volume controls
+            "stream.monitor" => "true",
+        },
+    };
+
+    // CoreRc derefs to Core, but StreamBox needs &Core with 'static lifetime
+    // Since core is &'static CoreRc, we can safely get a 'static reference to Core
+    let core_ref: &'static pipewire::core::Core = unsafe {
+        // SAFETY: core is 'static, so the Core inside is also valid for 'static
+        &*(core as &pipewire::core::Core as *const pipewire::core::Core)
+    };
+
+    let stream = match StreamBox::new(core_ref, stream_name, props) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("Failed to create peak monitor stream for {:?}: {}", device_type, e);
+            return None;
+        }
+    };
+
+    let user_data = PeakUserData {
+        device_type,
+        event_callback,
+    };
+
+    // Set up listener for the stream
+    let listener = stream
+        .add_local_listener_with_user_data(user_data)
+        .state_changed(|_, user_data, old_state, new_state| {
+            log::debug!(
+                "Peak stream {:?} state: {:?} -> {:?}",
+                user_data.device_type,
+                old_state,
+                new_state
+            );
+        })
+        .process(|stream, user_data| {
+            // Get the buffer with peak data
+            if let Some(mut buffer) = stream.dequeue_buffer() {
+                let datas = buffer.datas_mut();
+                if let Some(data) = datas.first_mut() {
+                    let chunk = data.chunk();
+                    if chunk.size() >= 4 {
+                        if let Some(slice) = data.data() {
+                            if slice.len() >= 4 {
+                                // Peak data is a single f32 value
+                                let peak = f32::from_ne_bytes([
+                                    slice[0], slice[1], slice[2], slice[3]
+                                ]);
+                                log::trace!("Peak {:?}: {}", user_data.device_type, peak);
+                                (user_data.event_callback)(AudioEvent::PeakLevel(
+                                    user_data.device_type,
+                                    peak.abs().min(1.0),
+                                ));
+                            }
+                        }
+                    }
+                }
+            } else {
+                log::trace!("No buffer for {:?}", user_data.device_type);
+            }
+        })
+        .register();
+
+    let listener = match listener {
+        Ok(l) => l,
+        Err(e) => {
+            log::warn!("Failed to register peak monitor listener: {}", e);
+            return None;
+        }
+    };
+
+    // Build audio format params for the stream - mono F32 at 25Hz for peak detection
+    use pw::spa::pod::{object, property};
+    use pw::spa::param::format::{FormatProperties, MediaType, MediaSubtype};
+    use pw::spa::param::audio::AudioFormat;
+    use pw::spa::utils::SpaTypes;
+    use pw::spa::param::ParamType;
+
+    let format_obj = object!(
+        SpaTypes::ObjectParamFormat,
+        ParamType::EnumFormat,
+        property!(FormatProperties::MediaType, Id, MediaType::Audio),
+        property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
+        property!(FormatProperties::AudioFormat, Id, AudioFormat::F32LE),
+        property!(FormatProperties::AudioRate, Int, 25),
+        property!(FormatProperties::AudioChannels, Int, 1),
+    );
+
+    let format_bytes: Vec<u8> = PodSerializer::serialize(
+        Cursor::new(Vec::new()),
+        &Value::Object(format_obj),
+    )
+    .map(|r| r.0.into_inner())
+    .unwrap_or_default();
+
+    let format_pod = match Pod::from_bytes(&format_bytes) {
+        Some(p) => p,
+        None => {
+            log::warn!("Failed to create format pod");
+            return None;
+        }
+    };
+
+    let mut params = [format_pod];
+
+    if let Err(e) = stream.connect(
+        Direction::Input,
+        None, // Let PipeWire find the target
+        StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
+        &mut params,
+    ) {
+        log::warn!("Failed to connect peak monitor stream: {}", e);
+        return None;
+    }
+
+    log::info!("Created peak monitor for {:?}, stream state: {:?}", device_type, stream.state());
+
+    Some(PeakMonitorState { stream, listener })
+}
+
 /// Run the PipeWire main loop
 fn run_pipewire_loop<F>(
     command_rx: mpsc::Receiver<AudioCommand>,
@@ -225,6 +401,10 @@ where
     let event_callback_for_remove = event_callback.clone();
     let event_callback_for_params = event_callback.clone();
     let event_callback_for_route_check = event_callback.clone();
+
+    // Create peak monitoring streams for output and input
+    let _sink_peak_monitor = create_peak_monitor(core, DeviceType::Sink, event_callback.clone());
+    let _source_peak_monitor = create_peak_monitor(core, DeviceType::Source, event_callback.clone());
 
     // Registry listener for global objects
     let _registry_listener = registry

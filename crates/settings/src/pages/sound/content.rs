@@ -391,8 +391,30 @@ impl SoundContent {
             AudioEvent::DefaultChanged(device_type, id) => {
                 self.update_default(device_type, id);
             }
+            AudioEvent::PeakLevel(device_type, level) => {
+                self.update_peak_level(device_type, level);
+            }
             AudioEvent::Error(msg) => {
                 log::error!("PipeWire error: {}", msg);
+            }
+        }
+    }
+
+    fn update_peak_level(&self, device_type: DeviceType, level: f32) {
+        let imp = self.imp();
+        // Use exponential moving average for smooth animation
+        const SMOOTHING: f64 = 0.3;
+
+        match device_type {
+            DeviceType::Sink => {
+                let prev = imp.output_level_bar.value();
+                let smoothed = (level as f64 * SMOOTHING) + (prev * (1.0 - SMOOTHING));
+                imp.output_level_bar.set_value(smoothed.clamp(0.0, 1.0));
+            }
+            DeviceType::Source => {
+                let prev = imp.input_level_bar.value();
+                let smoothed = (level as f64 * SMOOTHING) + (prev * (1.0 - SMOOTHING));
+                imp.input_level_bar.set_value(smoothed.clamp(0.0, 1.0));
             }
         }
     }
