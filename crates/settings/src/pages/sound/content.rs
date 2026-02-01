@@ -32,8 +32,6 @@ mod imp {
         #[template_child]
         pub output_mute_toggle: TemplateChild<gtk4::ToggleButton>,
         #[template_child]
-        pub output_volume_value: TemplateChild<gtk4::Label>,
-        #[template_child]
         pub output_level_bar: TemplateChild<gtk4::LevelBar>,
 
         // Input widgets
@@ -47,8 +45,6 @@ mod imp {
         pub input_slider: TemplateChild<gtk4::Scale>,
         #[template_child]
         pub input_mute_toggle: TemplateChild<gtk4::ToggleButton>,
-        #[template_child]
-        pub input_volume_value: TemplateChild<gtk4::Label>,
         #[template_child]
         pub input_level_bar: TemplateChild<gtk4::LevelBar>,
 
@@ -66,14 +62,12 @@ mod imp {
                 output_device_row: TemplateChild::default(),
                 output_slider: TemplateChild::default(),
                 output_mute_toggle: TemplateChild::default(),
-                output_volume_value: TemplateChild::default(),
                 output_level_bar: TemplateChild::default(),
                 input_group: TemplateChild::default(),
                 input_no_devices_group: TemplateChild::default(),
                 input_device_row: TemplateChild::default(),
                 input_slider: TemplateChild::default(),
                 input_mute_toggle: TemplateChild::default(),
-                input_volume_value: TemplateChild::default(),
                 input_level_bar: TemplateChild::default(),
                 sinks: RefCell::new(gio::ListStore::new::<AudioDevice>()),
                 sources: RefCell::new(gio::ListStore::new::<AudioDevice>()),
@@ -152,47 +146,74 @@ impl SoundContent {
         row.set_model(Some(model));
         row.set_expression(Some(expression));
 
-        // Create a custom factory for the dropdown that shows full text with icon
+        // Create a custom factory for the dropdown that shows device icon + text + checkmark
         let factory = gtk4::SignalListItemFactory::new();
 
         factory.connect_setup(|_, list_item| {
             let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
 
-            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-            hbox.set_margin_start(12);
-            hbox.set_margin_end(12);
-            hbox.set_margin_top(8);
-            hbox.set_margin_bottom(8);
+            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
-            let icon = gtk4::Image::new();
-            icon.set_icon_size(gtk4::IconSize::Normal);
-            hbox.append(&icon);
+            // Device icon
+            let device_icon = gtk4::Image::new();
+            device_icon.set_margin_start(6);
+            device_icon.set_margin_end(6);
+            hbox.append(&device_icon);
 
+            // Label
             let label = gtk4::Label::new(None);
             label.set_xalign(0.0);
+            label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            label.set_width_chars(1); // Allow shrinking
+            label.set_valign(gtk4::Align::Center);
             label.set_hexpand(true);
-            // Don't ellipsize - show full text
-            label.set_ellipsize(gtk4::pango::EllipsizeMode::None);
-            label.set_wrap(true);
-            label.set_wrap_mode(gtk4::pango::WrapMode::Word);
             hbox.append(&label);
+
+            // Checkmark icon for selected item (initially hidden)
+            let checkmark = gtk4::Image::from_icon_name("object-select-symbolic");
+            checkmark.set_opacity(0.0);
+            hbox.append(&checkmark);
 
             list_item.set_child(Some(&hbox));
         });
 
-        factory.connect_bind(|_, list_item| {
+        let row_weak = row.downgrade();
+        factory.connect_bind(move |_, list_item| {
             let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
             let item = list_item.item().and_downcast::<AudioDevice>();
             let hbox = list_item.child().and_downcast::<gtk4::Box>();
 
             if let (Some(device), Some(hbox)) = (item, hbox) {
-                // Get icon and label from hbox
-                if let Some(icon) = hbox.first_child().and_downcast::<gtk4::Image>() {
+                // Get widgets from hbox
+                let device_icon = hbox.first_child().and_downcast::<gtk4::Image>();
+                let label = device_icon
+                    .as_ref()
+                    .and_then(|i| i.next_sibling())
+                    .and_downcast::<gtk4::Label>();
+                let checkmark = hbox.last_child().and_downcast::<gtk4::Image>();
+
+                // Set device icon
+                if let Some(device_icon) = device_icon {
                     let icon_name = get_device_icon(&device);
-                    icon.set_icon_name(Some(icon_name));
+                    device_icon.set_icon_name(Some(icon_name));
                 }
-                if let Some(label) = hbox.last_child().and_downcast::<gtk4::Label>() {
+
+                // Set label
+                if let Some(label) = label {
                     label.set_label(&device.description());
+                }
+
+                // Show checkmark if this is the selected item
+                if let (Some(checkmark), Some(row)) = (checkmark, row_weak.upgrade()) {
+                    let is_selected = row.selected_item().as_ref()
+                        == list_item.item().as_ref();
+                    checkmark.set_opacity(if is_selected { 1.0 } else { 0.0 });
+
+                    // Check if we're in the popover (checkmark only visible there)
+                    let in_popover = checkmark
+                        .ancestor(gtk4::Popover::static_type())
+                        .is_some();
+                    checkmark.set_visible(in_popover);
                 }
             }
         });
@@ -209,9 +230,6 @@ impl SoundContent {
             self,
             move |slider| {
                 let imp = this.imp();
-
-                // Always update the volume label
-                this.update_output_volume_label(slider.value());
 
                 if imp.updating_ui.get() {
                     return;
@@ -282,9 +300,6 @@ impl SoundContent {
             self,
             move |slider| {
                 let imp = this.imp();
-
-                // Always update the volume label
-                this.update_input_volume_label(slider.value());
 
                 if imp.updating_ui.get() {
                     return;
@@ -593,9 +608,6 @@ impl SoundContent {
             imp.output_slider.set_value(ui_volume);
         }
 
-        // Update volume label
-        self.update_output_volume_label(ui_volume);
-
         if imp.output_mute_toggle.is_active() != device.is_muted() {
             imp.output_mute_toggle.set_active(device.is_muted());
         }
@@ -612,23 +624,10 @@ impl SoundContent {
             imp.input_slider.set_value(ui_volume);
         }
 
-        // Update volume label
-        self.update_input_volume_label(ui_volume);
-
         if imp.input_mute_toggle.is_active() != device.is_muted() {
             imp.input_mute_toggle.set_active(device.is_muted());
         }
         self.update_input_mute_icon();
-    }
-
-    fn update_output_volume_label(&self, volume: f64) {
-        let imp = self.imp();
-        imp.output_volume_value.set_label(&format!("{}%", volume.round() as i32));
-    }
-
-    fn update_input_volume_label(&self, volume: f64) {
-        let imp = self.imp();
-        imp.input_volume_value.set_label(&format!("{}%", volume.round() as i32));
     }
 
     fn update_output_mute_icon(&self) {

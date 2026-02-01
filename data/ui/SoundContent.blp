@@ -11,20 +11,16 @@ template $SwaySettingsSoundContent: Adw.Bin {
       Adw.PreferencesGroup output_group {
         title: "Output";
 
-        header-suffix: Box {
-          spacing: 12;
+        header-suffix: LevelBar output_level_bar {
+          valign: center;
+          width-request: 40;
+          min-value: 0;
+          max-value: 1;
+          mode: continuous;
 
-          LevelBar output_level_bar {
-            valign: center;
-            width-request: 100;
-            min-value: 0;
-            max-value: 1;
-            mode: continuous;
-
-            styles [
-              "audio-level"
-            ]
-          }
+          styles [
+            "audio-level"
+          ]
         };
 
         Adw.ComboRow output_device_row {
@@ -43,9 +39,10 @@ template $SwaySettingsSoundContent: Adw.Bin {
             spacing: 12;
 
             Label output_volume_label {
+              ellipsize: end;
               xalign: 0;
-              label: "Volume";
-              width-chars: 8;
+              label: "Output Volume";
+              use-underline: true;
             }
 
             ToggleButton output_mute_toggle {
@@ -72,16 +69,6 @@ template $SwaySettingsSoundContent: Adw.Bin {
 
               marks [
                 mark (100, bottom)
-              ]
-            }
-
-            Label output_volume_value {
-              width-chars: 4;
-              xalign: 1;
-              label: "0%";
-
-              styles [
-                "dim-label"
               ]
             }
           }
@@ -111,7 +98,7 @@ template $SwaySettingsSoundContent: Adw.Bin {
 
         header-suffix: LevelBar input_level_bar {
           valign: center;
-          width-request: 100;
+          width-request: 40;
           min-value: 0;
           max-value: 1;
           mode: continuous;
@@ -137,9 +124,10 @@ template $SwaySettingsSoundContent: Adw.Bin {
             spacing: 12;
 
             Label input_volume_label {
+              ellipsize: end;
               xalign: 0;
-              label: "Volume";
-              width-chars: 8;
+              label: "Input Volume";
+              use-underline: true;
             }
 
             ToggleButton input_mute_toggle {
@@ -166,16 +154,6 @@ template $SwaySettingsSoundContent: Adw.Bin {
 
               marks [
                 mark (100, bottom)
-              ]
-            }
-
-            Label input_volume_value {
-              width-chars: 4;
-              xalign: 1;
-              label: "0%";
-
-              styles [
-                "dim-label"
               ]
             }
           }
