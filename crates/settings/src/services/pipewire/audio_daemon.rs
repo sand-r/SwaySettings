@@ -17,6 +17,13 @@ use pipewire::spa::pod::{Object, Pod, Property, PropertyFlags, Value, ValueArray
 use pipewire::spa::sys::{
     SPA_PARAM_Props, SPA_PROP_channelVolumes, SPA_PROP_mute, SPA_PROP_volume,
     SPA_TYPE_OBJECT_Props,
+    // Route param constants
+    SPA_PARAM_ROUTE_direction, SPA_PARAM_ROUTE_name,
+    SPA_PARAM_ROUTE_description, SPA_PARAM_ROUTE_available,
+    // Availability values: unknown=0, no=1, yes=2
+    SPA_PARAM_AVAILABILITY_no,
+    // Direction values
+    SPA_DIRECTION_INPUT, SPA_DIRECTION_OUTPUT,
 };
 use pipewire::types::ObjectType;
 
@@ -138,12 +145,35 @@ struct DeviceState {
     node: pipewire::node::Node,
     _listener: pipewire::node::NodeListener,
     channel_count: u32,
+    /// Whether this node is visible in the GUI (based on route availability)
+    visible: bool,
+    /// The node.nick used for matching with route names
+    nick: String,
+    /// Parent device ID (for matching with route availability)
+    parent_device_id: Option<u32>,
 }
 
 /// State for metadata (default device tracking)
 struct MetadataState {
     metadata: Metadata,
     _listener: pipewire::metadata::MetadataListener,
+}
+
+/// Route availability info from a PipeWire Device
+#[derive(Debug, Clone)]
+struct RouteInfo {
+    name: String,
+    #[allow(dead_code)]
+    description: String,
+    direction: u32, // SPA_DIRECTION_INPUT or SPA_DIRECTION_OUTPUT
+    available: u32, // SPA_PARAM_AVAILABILITY_*
+}
+
+/// State for a PipeWire Device (sound card) - tracks route availability
+struct PwDeviceState {
+    #[allow(dead_code)]
+    device: pipewire::device::Device,
+    _listener: pipewire::device::DeviceListener,
 }
 
 /// Run the PipeWire main loop
@@ -165,19 +195,28 @@ where
     let registry = Rc::new(core.get_registry()?);
 
     // Shared state
-    let devices: Rc<RefCell<HashMap<u32, DeviceState>>> = Rc::new(RefCell::new(HashMap::new()));
+    let nodes: Rc<RefCell<HashMap<u32, DeviceState>>> = Rc::new(RefCell::new(HashMap::new()));
     let default_sink_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let default_source_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let metadata_state: Rc<RefCell<Option<MetadataState>>> = Rc::new(RefCell::new(None));
+    // PipeWire Device objects (sound cards)
+    let pw_devices: Rc<RefCell<HashMap<u32, PwDeviceState>>> = Rc::new(RefCell::new(HashMap::new()));
+    // Route availability info: device_id -> Vec<RouteInfo>
+    let route_availability: Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>> =
+        Rc::new(RefCell::new(HashMap::new()));
 
     // Clone for closures - each closure that captures with `move` needs its own clone
-    let devices_for_global = devices.clone();
-    let devices_for_remove = devices.clone();
-    let devices_for_commands = devices.clone();
+    let nodes_for_global = nodes.clone();
+    let nodes_for_remove = nodes.clone();
+    let nodes_for_commands = nodes.clone();
     let default_sink_name_for_global = default_sink_name.clone();
     let default_source_name_for_global = default_source_name.clone();
     let metadata_state_for_global = metadata_state.clone();
     let metadata_state_for_commands = metadata_state.clone();
+    let pw_devices_for_global = pw_devices.clone();
+    let route_availability_for_global = route_availability.clone();
+    let route_availability_for_nodes = route_availability.clone();
+    let nodes_for_route_check = nodes.clone();
     let registry_for_global = registry.clone();
 
     // Wrap callback in Rc for sharing
@@ -185,6 +224,7 @@ where
     let event_callback_for_global = event_callback.clone();
     let event_callback_for_remove = event_callback.clone();
     let event_callback_for_params = event_callback.clone();
+    let event_callback_for_route_check = event_callback.clone();
 
     // Registry listener for global objects
     let _registry_listener = registry
@@ -196,7 +236,7 @@ where
                     global,
                     &registry_for_global,
                     &metadata_state_for_global,
-                    &devices_for_global,
+                    &nodes_for_global,
                     &default_sink_name_for_global,
                     &default_source_name_for_global,
                     event_callback_for_global.clone(),
@@ -204,18 +244,32 @@ where
                 return;
             }
 
-            handle_global_added(
+            // Handle PipeWire Device objects (sound cards) to get route availability
+            if global.type_ == ObjectType::Device {
+                handle_pw_device_added(
+                    global,
+                    &registry_for_global,
+                    &pw_devices_for_global,
+                    &route_availability_for_global,
+                    &nodes_for_route_check,
+                    event_callback_for_route_check.clone(),
+                );
+                return;
+            }
+
+            handle_node_added(
                 global,
                 &registry_for_global,
-                &devices_for_global,
+                &nodes_for_global,
                 &default_sink_name_for_global,
                 &default_source_name_for_global,
+                &route_availability_for_nodes,
                 event_callback_for_global.as_ref(),
                 event_callback_for_params.clone(),
             );
         })
         .global_remove(move |id| {
-            let mut devs = devices_for_remove.borrow_mut();
+            let mut devs = nodes_for_remove.borrow_mut();
             if devs.remove(&id).is_some() {
                 event_callback_for_remove(AudioEvent::DeviceRemoved(id));
             }
@@ -248,14 +302,14 @@ where
                 *should_quit_clone.borrow_mut() = true;
             }
             AudioCommand::SetVolume(id, volume) => {
-                set_device_volume(&devices_for_commands, id, volume);
+                set_node_volume(&nodes_for_commands, id, volume);
             }
             AudioCommand::SetMute(id, muted) => {
-                set_device_mute(&devices_for_commands, id, muted);
+                set_node_mute(&nodes_for_commands, id, muted);
             }
             AudioCommand::SetDefaultSink(id) => {
                 set_default_device(
-                    &devices_for_commands,
+                    &nodes_for_commands,
                     &metadata_state_for_commands,
                     id,
                     DeviceType::Sink,
@@ -263,7 +317,7 @@ where
             }
             AudioCommand::SetDefaultSource(id) => {
                 set_default_device(
-                    &devices_for_commands,
+                    &nodes_for_commands,
                     &metadata_state_for_commands,
                     id,
                     DeviceType::Source,
@@ -283,12 +337,13 @@ where
     Ok(())
 }
 
-fn handle_global_added<F>(
+fn handle_node_added<F>(
     global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
     registry: &pipewire::registry::Registry,
-    devices: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
     default_sink_name: &Rc<RefCell<Option<String>>>,
     default_source_name: &Rc<RefCell<Option<String>>>,
+    route_availability: &Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>>,
     event_callback: &F,
     event_callback_rc: Rc<F>,
 ) where
@@ -336,9 +391,40 @@ fn handle_global_added<F>(
         _ => name.clone(),
     };
 
-    if let Some(available) = props.get("port.available") {
-        if available == "no" {
-            return;
+    // Log all properties to understand what PipeWire provides
+    log::debug!("Node {} properties:", name);
+    for (key, value) in props.iter() {
+        log::debug!("  {}: {}", key, value);
+    }
+
+    // Get parent device ID for route availability matching
+    let parent_device_id = props
+        .get("device.id")
+        .and_then(|s| s.parse::<u32>().ok());
+
+    // Store the nick for route matching
+    let node_nick = nick.unwrap_or("").to_string();
+
+    // Check initial route availability
+    let mut initially_visible = true;
+    if let Some(device_id) = parent_device_id {
+        let routes = route_availability.borrow();
+        if let Some(device_routes) = routes.get(&device_id) {
+            let expected_direction = match device_type {
+                DeviceType::Sink => SPA_DIRECTION_OUTPUT,
+                DeviceType::Source => SPA_DIRECTION_INPUT,
+            };
+
+            if let Some(route_info) = find_matching_route(device_routes, &node_nick, expected_direction) {
+                if route_info.available == SPA_PARAM_AVAILABILITY_no {
+                    initially_visible = false;
+                    log::debug!(
+                        "Node {} initially hidden: route '{}' not available",
+                        name,
+                        route_info.name,
+                    );
+                }
+            }
         }
     }
 
@@ -374,7 +460,7 @@ fn handle_global_added<F>(
         }
     };
 
-    let devices_for_listener = devices.clone();
+    let nodes_for_listener = nodes.clone();
     let default_sink_name_for_listener = default_sink_name.clone();
     let default_source_name_for_listener = default_source_name.clone();
     let name_for_listener = name.clone();
@@ -389,7 +475,7 @@ fn handle_global_added<F>(
             let Some(pod) = param else { return };
 
             if let Some((volume, muted, channel_count)) = parse_audio_props(pod) {
-                let mut devs = devices_for_listener.borrow_mut();
+                let mut devs = nodes_for_listener.borrow_mut();
                 if let Some(state) = devs.get_mut(&id) {
                     let changed = (state.info.volume - volume).abs() > 0.001
                         || state.info.is_muted != muted;
@@ -429,11 +515,12 @@ fn handle_global_added<F>(
     node.subscribe_params(&[ParamType::Props]);
 
     log::debug!(
-        "Added {} device: {} (id={}, default={})",
+        "Added {} device: {} (id={}, default={}, visible={})",
         device_type.name(),
         info.description,
         id,
-        is_default
+        is_default,
+        initially_visible
     );
 
     let state = DeviceState {
@@ -441,10 +528,261 @@ fn handle_global_added<F>(
         node,
         _listener: listener,
         channel_count: 2,
+        visible: initially_visible,
+        nick: node_nick,
+        parent_device_id,
     };
 
-    devices.borrow_mut().insert(id, state);
-    event_callback(AudioEvent::DeviceAdded(info));
+    nodes.borrow_mut().insert(id, state);
+
+    // Only notify GUI if initially visible
+    if initially_visible {
+        event_callback(AudioEvent::DeviceAdded(info));
+    }
+}
+
+/// Find a matching route for a node nick
+fn find_matching_route<'a>(
+    routes: &'a [RouteInfo],
+    node_nick: &str,
+    expected_direction: u32,
+) -> Option<&'a RouteInfo> {
+    // Normalize for comparison:
+    // - Route "HDMI1" should match nick "HDMI 1" (whitespace)
+    // - Route "Headset" should match nick "Headset Microphone" (prefix)
+    let nick_normalized: String = node_nick.chars().filter(|c| !c.is_whitespace()).collect();
+
+    routes.iter().find(|r| {
+        if r.direction != expected_direction {
+            return false;
+        }
+        let route_normalized: String = r.name.chars().filter(|c| !c.is_whitespace()).collect();
+        nick_normalized == route_normalized || nick_normalized.starts_with(&route_normalized)
+    })
+}
+
+/// Update node visibility based on route availability and emit events
+fn update_node_visibility<F>(
+    nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    device_id: u32,
+    route_info: &RouteInfo,
+    event_callback: &F,
+) where
+    F: Fn(AudioEvent),
+{
+    let is_available = route_info.available != SPA_PARAM_AVAILABILITY_no;
+
+    let mut nodes_mut = nodes.borrow_mut();
+    for state in nodes_mut.values_mut() {
+        // Only check nodes belonging to this device
+        if state.parent_device_id != Some(device_id) {
+            continue;
+        }
+
+        let node_direction = match state.info.device_type {
+            DeviceType::Sink => SPA_DIRECTION_OUTPUT,
+            DeviceType::Source => SPA_DIRECTION_INPUT,
+        };
+
+        if node_direction != route_info.direction {
+            continue;
+        }
+
+        // Check if this node matches the route
+        let nick_normalized: String = state.nick.chars().filter(|c| !c.is_whitespace()).collect();
+        let route_normalized: String = route_info
+            .name
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+
+        let matches =
+            nick_normalized == route_normalized || nick_normalized.starts_with(&route_normalized);
+
+        if !matches {
+            continue;
+        }
+
+        // Update visibility if changed
+        if state.visible != is_available {
+            state.visible = is_available;
+            if is_available {
+                log::debug!(
+                    "Node {} now available: route '{}'",
+                    state.info.name,
+                    route_info.name
+                );
+                event_callback(AudioEvent::DeviceAdded(state.info.clone()));
+            } else {
+                log::debug!(
+                    "Node {} now unavailable: route '{}'",
+                    state.info.name,
+                    route_info.name
+                );
+                event_callback(AudioEvent::DeviceRemoved(state.info.id));
+            }
+        }
+    }
+}
+
+/// Handle PipeWire Device objects (sound cards) to get route availability info
+fn handle_pw_device_added<F>(
+    global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+    registry: &pipewire::registry::Registry,
+    pw_devices: &Rc<RefCell<HashMap<u32, PwDeviceState>>>,
+    route_availability: &Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>>,
+    nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    event_callback: Rc<F>,
+) where
+    F: Fn(AudioEvent) + 'static,
+{
+    let props = match global.props {
+        Some(props) => props,
+        None => return,
+    };
+
+    // Only interested in ALSA devices (sound cards)
+    let device_name = props.get("device.name").unwrap_or("");
+    if !device_name.starts_with("alsa_card") {
+        return;
+    }
+
+    log::debug!("Found PipeWire Device: {} (id={})", device_name, global.id);
+
+    let device: pipewire::device::Device = match registry.bind(global) {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("Failed to bind device {}: {}", global.id, e);
+            return;
+        }
+    };
+
+    let device_id = global.id;
+    let route_availability_for_listener = route_availability.clone();
+    let nodes_for_listener = nodes.clone();
+    let event_callback_for_listener = event_callback;
+
+    // Subscribe to Route params to get availability info
+    let listener = device
+        .add_listener_local()
+        .info(|_info| {
+            // Device info received, routes will come via param callback
+        })
+        .param(move |_seq, param_type, _index, _next, param| {
+            // Handle both EnumRoute (initial enumeration) and Route (dynamic updates)
+            if param_type == ParamType::EnumRoute || param_type == ParamType::Route {
+                if let Some(pod) = param {
+                    if let Some(route_info) = parse_route_param(pod) {
+                        log::debug!(
+                            "Device {} route: name='{}', direction={}, available={}",
+                            device_id,
+                            route_info.name,
+                            if route_info.direction == SPA_DIRECTION_OUTPUT {
+                                "output"
+                            } else {
+                                "input"
+                            },
+                            route_info.available
+                        );
+
+                        // Update node visibility based on route availability
+                        update_node_visibility(
+                            &nodes_for_listener,
+                            device_id,
+                            &route_info,
+                            event_callback_for_listener.as_ref(),
+                        );
+
+                        // Store route info for future node additions
+                        let mut routes = route_availability_for_listener.borrow_mut();
+                        let device_routes = routes.entry(device_id).or_insert_with(Vec::new);
+
+                        // Update existing route or add new one
+                        if let Some(existing) = device_routes
+                            .iter_mut()
+                            .find(|r| r.name == route_info.name && r.direction == route_info.direction)
+                        {
+                            existing.available = route_info.available;
+                        } else {
+                            device_routes.push(route_info);
+                        }
+                    }
+                }
+            }
+        })
+        .register();
+
+    // Subscribe to both EnumRoute (initial) and Route (dynamic changes)
+    device.subscribe_params(&[ParamType::EnumRoute, ParamType::Route]);
+
+    let state = PwDeviceState {
+        device,
+        _listener: listener,
+    };
+
+    pw_devices.borrow_mut().insert(global.id, state);
+}
+
+/// Parse a Route param pod to extract availability info
+fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
+    let value = match PodDeserializer::deserialize_any_from(pod.as_bytes()) {
+        Ok((_, val)) => val,
+        Err(_) => return None,
+    };
+
+    let Value::Object(obj) = value else {
+        return None;
+    };
+
+    let mut name = String::new();
+    let mut description = String::new();
+    let mut direction: u32 = 0;
+    let mut available: u32 = 0;
+
+    for prop in obj.properties {
+        match prop.key {
+            k if k == SPA_PARAM_ROUTE_name => {
+                if let Value::String(s) = prop.value {
+                    name = s;
+                }
+            }
+            k if k == SPA_PARAM_ROUTE_description => {
+                if let Value::String(s) = prop.value {
+                    description = s;
+                }
+            }
+            k if k == SPA_PARAM_ROUTE_direction => {
+                if let Value::Id(id) = prop.value {
+                    direction = id.0;
+                }
+            }
+            k if k == SPA_PARAM_ROUTE_available => {
+                if let Value::Id(id) = prop.value {
+                    available = id.0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if name.is_empty() {
+        return None;
+    }
+
+    // Strip [Out] or [In] prefix from route names
+    // e.g., "[Out] Speaker" -> "Speaker", "[In] Mic" -> "Mic"
+    let name = name
+        .strip_prefix("[Out] ")
+        .or_else(|| name.strip_prefix("[In] "))
+        .unwrap_or(&name)
+        .to_string();
+
+    Some(RouteInfo {
+        name,
+        description,
+        direction,
+        available,
+    })
 }
 
 /// Parse volume and mute from Props pod
@@ -495,11 +833,11 @@ fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
     }
 }
 
-/// Set volume for a device via PipeWire
-fn set_device_volume(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, volume: f64) {
-    let devs = devices.borrow();
+/// Set volume for a node via PipeWire
+fn set_node_volume(nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, volume: f64) {
+    let devs = nodes.borrow();
     let Some(state) = devs.get(&id) else {
-        log::warn!("set_device_volume: device {} not found", id);
+        log::warn!("set_node_volume: node {} not found", id);
         return;
     };
 
@@ -543,15 +881,15 @@ fn set_device_volume(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, 
     }
 }
 
-/// Set mute state for a device via PipeWire
-fn set_device_mute(devices: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, muted: bool) {
-    let devs = devices.borrow();
+/// Set mute state for a node via PipeWire
+fn set_node_mute(nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, muted: bool) {
+    let devs = nodes.borrow();
     let Some(state) = devs.get(&id) else {
-        log::warn!("set_device_mute: device {} not found", id);
+        log::warn!("set_node_mute: node {} not found", id);
         return;
     };
 
-    log::debug!("Setting mute for device {}: {}", id, muted);
+    log::debug!("Setting mute for node {}: {}", id, muted);
 
     let obj = Object {
         type_: SPA_TYPE_OBJECT_Props,
