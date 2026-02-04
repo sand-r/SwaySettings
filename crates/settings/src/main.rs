@@ -12,7 +12,6 @@ mod sidebar_row;
 
 use settings_window::SettingsWindow;
 
-
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Cli {

@@ -143,7 +143,8 @@ impl BluezDevice {
 
     /// Get the icon name for display (with fallback).
     pub fn display_icon(&self) -> String {
-        self.icon().unwrap_or_else(|| "bluetooth-symbolic".to_string())
+        self.icon()
+            .unwrap_or_else(|| "bluetooth-symbolic".to_string())
     }
 
     /// Connect to the device.
@@ -208,10 +209,9 @@ impl BluezDevice {
 
     /// Connect a callback to property changes.
     pub fn connect_properties_changed<F: Fn(&str, &glib::Variant) + 'static>(&self, callback: F) {
-        let handler_id = self.proxy.connect_local(
-            "g-properties-changed",
-            false,
-            move |values| {
+        let handler_id = self
+            .proxy
+            .connect_local("g-properties-changed", false, move |values| {
                 // The second argument is the changed properties dict as a{sv}
                 if let Some(changed) = values.get(1).and_then(|v| v.get::<glib::Variant>().ok()) {
                     // The changed dict contains property name -> value pairs
@@ -219,8 +219,7 @@ impl BluezDevice {
                     callback("properties-changed", &changed);
                 }
                 None
-            },
-        );
+            });
         *self.changed_handler_id.borrow_mut() = Some(handler_id);
     }
 

@@ -72,9 +72,7 @@ glib::wrapper! {
 
 impl SettingsWindow {
     pub fn new(app: &libadwaita::Application, settings: &gio::Settings) -> Self {
-        let window: Self = Object::builder()
-            .property("application", app)
-            .build();
+        let window: Self = Object::builder().property("application", app).build();
 
         window.imp().settings.set(settings.clone()).unwrap();
         window.restore_window_size(settings);
@@ -190,17 +188,33 @@ impl SettingsWindow {
             (PageType::Users, "org.gnome.Settings-users-symbolic", 0),
             // Group 1: System
             (PageType::AboutPc, "org.gnome.Settings-about-symbolic", 1),
-            (PageType::Bluetooth, "org.gnome.Settings-bluetooth-symbolic", 1),
+            (
+                PageType::Bluetooth,
+                "org.gnome.Settings-bluetooth-symbolic",
+                1,
+            ),
             (PageType::Sound, "org.gnome.Settings-sound-symbolic", 1),
             (PageType::Power, "org.gnome.Settings-power-symbolic", 1),
             // Group 2: Desktop
             (PageType::Wallpaper, "preferences-desktop-wallpaper", 2),
-            (PageType::Appearance, "org.gnome.Settings-appearance-symbolic", 2),
+            (
+                PageType::Appearance,
+                "org.gnome.Settings-appearance-symbolic",
+                2,
+            ),
             (PageType::StartupApps, "system-run-symbolic", 2),
-            (PageType::DefaultApps, "org.gnome.Settings-applications-symbolic", 2),
+            (
+                PageType::DefaultApps,
+                "org.gnome.Settings-applications-symbolic",
+                2,
+            ),
             (PageType::Screenshot, "camera-photo-symbolic", 2),
             // Group 3: Input
-            (PageType::Keyboard, "org.gnome.Settings-keyboard-symbolic", 3),
+            (
+                PageType::Keyboard,
+                "org.gnome.Settings-keyboard-symbolic",
+                3,
+            ),
             (PageType::Mouse, "org.gnome.Settings-mouse-symbolic", 3),
             (PageType::Trackpad, "input-touchpad-symbolic", 3),
         ]

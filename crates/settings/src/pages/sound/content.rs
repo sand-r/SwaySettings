@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gio::prelude::*;
@@ -10,9 +11,16 @@ use libadwaita::prelude::*;
 use libadwaita::subclass::prelude::*;
 
 use super::audio_device::AudioDevice;
+use super::profile_item::ProfileItem;
 use crate::services::pipewire::{
-    cubic_to_linear, linear_to_cubic, AudioDaemon, AudioEvent, DeviceType,
+    cubic_to_linear, linear_to_cubic, AudioDaemon, AudioEvent, DeviceType, ProfileInfo,
 };
+
+#[derive(Clone, Default)]
+pub(crate) struct ProfileState {
+    profiles: Vec<ProfileInfo>,
+    active_index: Option<u32>,
+}
 
 mod imp {
     use super::*;
@@ -28,6 +36,8 @@ mod imp {
         #[template_child]
         pub output_device_row: TemplateChild<libadwaita::ComboRow>,
         #[template_child]
+        pub output_profile_row: TemplateChild<libadwaita::ComboRow>,
+        #[template_child]
         pub output_slider: TemplateChild<gtk4::Scale>,
         #[template_child]
         pub output_mute_toggle: TemplateChild<gtk4::ToggleButton>,
@@ -42,6 +52,8 @@ mod imp {
         #[template_child]
         pub input_device_row: TemplateChild<libadwaita::ComboRow>,
         #[template_child]
+        pub input_profile_row: TemplateChild<libadwaita::ComboRow>,
+        #[template_child]
         pub input_slider: TemplateChild<gtk4::Scale>,
         #[template_child]
         pub input_mute_toggle: TemplateChild<gtk4::ToggleButton>,
@@ -50,6 +62,9 @@ mod imp {
 
         pub sinks: RefCell<gio::ListStore>,
         pub sources: RefCell<gio::ListStore>,
+        pub output_profiles: RefCell<gio::ListStore>,
+        pub input_profiles: RefCell<gio::ListStore>,
+        pub(super) profiles: RefCell<HashMap<u32, ProfileState>>,
         pub daemon: RefCell<Option<Rc<AudioDaemon>>>,
         pub updating_ui: Cell<bool>,
     }
@@ -60,17 +75,22 @@ mod imp {
                 output_group: TemplateChild::default(),
                 output_no_devices_group: TemplateChild::default(),
                 output_device_row: TemplateChild::default(),
+                output_profile_row: TemplateChild::default(),
                 output_slider: TemplateChild::default(),
                 output_mute_toggle: TemplateChild::default(),
                 output_level_bar: TemplateChild::default(),
                 input_group: TemplateChild::default(),
                 input_no_devices_group: TemplateChild::default(),
                 input_device_row: TemplateChild::default(),
+                input_profile_row: TemplateChild::default(),
                 input_slider: TemplateChild::default(),
                 input_mute_toggle: TemplateChild::default(),
                 input_level_bar: TemplateChild::default(),
                 sinks: RefCell::new(gio::ListStore::new::<AudioDevice>()),
                 sources: RefCell::new(gio::ListStore::new::<AudioDevice>()),
+                output_profiles: RefCell::new(gio::ListStore::new::<ProfileItem>()),
+                input_profiles: RefCell::new(gio::ListStore::new::<ProfileItem>()),
+                profiles: RefCell::new(HashMap::new()),
                 daemon: RefCell::new(None),
                 updating_ui: Cell::new(false),
             }
@@ -126,6 +146,11 @@ impl SoundContent {
         // Set up ComboRow models with expression for description
         self.setup_combo_row(&imp.output_device_row, &imp.sinks.borrow());
         self.setup_combo_row(&imp.input_device_row, &imp.sources.borrow());
+        self.setup_profile_row(&imp.output_profile_row, &imp.output_profiles.borrow());
+        self.setup_profile_row(&imp.input_profile_row, &imp.input_profiles.borrow());
+
+        imp.output_profile_row.set_visible(false);
+        imp.input_profile_row.set_visible(false);
 
         // Connect slider value-changed signals
         self.connect_output_controls();
@@ -137,65 +162,23 @@ impl SoundContent {
 
     fn setup_combo_row(&self, row: &libadwaita::ComboRow, model: &gio::ListStore) {
         row.set_model(Some(model));
+        // Use a single factory for both the selected row and the popover list,
+        // mirroring GNOME Control Center's CcDeviceComboRow.
+        let factory = gtk4::SignalListItemFactory::new();
 
-        // Factory for the selected item display (collapsed row) - icon + full text
-        let selected_factory = gtk4::SignalListItemFactory::new();
-
-        selected_factory.connect_setup(|_, list_item| {
+        factory.connect_setup(|_, list_item| {
             let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
-
-            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-
-            // Device icon
-            let device_icon = gtk4::Image::new();
-            hbox.append(&device_icon);
-
-            // Label - no ellipsize for selected item
-            let label = gtk4::Label::new(None);
-            label.set_xalign(0.0);
-            label.set_valign(gtk4::Align::Center);
-            hbox.append(&label);
-
-            list_item.set_child(Some(&hbox));
-        });
-
-        selected_factory.connect_bind(|_, list_item| {
-            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
-            let item = list_item.item().and_downcast::<AudioDevice>();
-            let hbox = list_item.child().and_downcast::<gtk4::Box>();
-
-            if let (Some(device), Some(hbox)) = (item, hbox) {
-                let device_icon = hbox.first_child().and_downcast::<gtk4::Image>();
-                let label = hbox.last_child().and_downcast::<gtk4::Label>();
-
-                if let Some(device_icon) = device_icon {
-                    let icon_name = get_device_icon(&device);
-                    device_icon.set_icon_name(Some(&icon_name));
-                }
-
-                if let Some(label) = label {
-                    label.set_label(&device.description());
-                }
-            }
-        });
-
-        row.set_factory(Some(&selected_factory));
-
-        // Factory for dropdown items - icon + text + checkmark
-        let list_factory = gtk4::SignalListItemFactory::new();
-
-        list_factory.connect_setup(|_, list_item| {
-            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
-
             let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            hbox.set_hexpand(true);
+            hbox.set_halign(gtk4::Align::Fill);
 
-            // Device icon
-            let device_icon = gtk4::Image::new();
+            let device_icon = gtk4::Image::builder()
+                .accessible_role(gtk4::AccessibleRole::Presentation)
+                .build();
             device_icon.set_margin_start(6);
             device_icon.set_margin_end(6);
             hbox.append(&device_icon);
 
-            // Label
             let label = gtk4::Label::new(None);
             label.set_xalign(0.0);
             label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -204,8 +187,10 @@ impl SoundContent {
             label.set_hexpand(true);
             hbox.append(&label);
 
-            // Checkmark icon for selected item
-            let checkmark = gtk4::Image::from_icon_name("object-select-symbolic");
+            let checkmark = gtk4::Image::builder()
+                .accessible_role(gtk4::AccessibleRole::Presentation)
+                .icon_name("object-select-symbolic")
+                .build();
             checkmark.set_opacity(0.0);
             hbox.append(&checkmark);
 
@@ -213,7 +198,7 @@ impl SoundContent {
         });
 
         let row_weak = row.downgrade();
-        list_factory.connect_bind(move |_, list_item| {
+        factory.connect_bind(move |_, list_item| {
             let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
             let item = list_item.item().and_downcast::<AudioDevice>();
             let hbox = list_item.child().and_downcast::<gtk4::Box>();
@@ -226,29 +211,125 @@ impl SoundContent {
                     .and_downcast::<gtk4::Label>();
                 let checkmark = hbox.last_child().and_downcast::<gtk4::Image>();
 
-                // Set device icon
                 if let Some(device_icon) = device_icon {
                     let icon_name = get_device_icon(&device);
                     device_icon.set_icon_name(Some(&icon_name));
                 }
 
-                // Set label
                 if let Some(label) = label {
                     label.set_label(&device.description());
                 }
 
-                // Handle checkmark
                 if let (Some(checkmark), Some(row)) = (checkmark.clone(), row_weak.upgrade()) {
-                    // Update checkmark on selection change
                     let list_item_for_notify = list_item.clone();
                     let checkmark_for_notify = checkmark.clone();
                     row.connect_selected_item_notify(move |row| {
-                        let is_selected = row.selected_item().as_ref()
-                            == list_item_for_notify.item().as_ref();
+                        let is_selected =
+                            row.selected_item().as_ref() == list_item_for_notify.item().as_ref();
                         checkmark_for_notify.set_opacity(if is_selected { 1.0 } else { 0.0 });
                     });
 
-                    // Initial checkmark state
+                    let is_selected = row.selected_item().as_ref() == list_item.item().as_ref();
+                    checkmark.set_opacity(if is_selected { 1.0 } else { 0.0 });
+
+                    let checkmark_for_root = checkmark.clone();
+                    let row_for_root = row.clone();
+                    hbox.connect_notify_local(Some("root"), move |widget, _| {
+                        let in_popover = widget
+                            .ancestor(gtk4::Popover::static_type())
+                            .is_some()
+                            && widget
+                                .ancestor(libadwaita::ComboRow::static_type())
+                                .and_then(|combo| combo.downcast::<libadwaita::ComboRow>().ok())
+                                .map(|combo| combo == row_for_root)
+                                .unwrap_or(false);
+                        checkmark_for_root.set_visible(in_popover);
+                    });
+
+                    let in_popover = hbox
+                        .ancestor(gtk4::Popover::static_type())
+                        .is_some()
+                        && hbox
+                            .ancestor(libadwaita::ComboRow::static_type())
+                            .and_then(|combo| combo.downcast::<libadwaita::ComboRow>().ok())
+                            .map(|combo| combo == row)
+                            .unwrap_or(false);
+                    checkmark.set_visible(in_popover);
+                }
+            }
+        });
+
+        row.set_factory(Some(&factory));
+        row.set_list_factory(Some(&factory));
+    }
+
+    fn setup_profile_row(&self, row: &libadwaita::ComboRow, model: &gio::ListStore) {
+        row.set_model(Some(model));
+
+        // Selected item factory (collapsed row) - label only
+        let selected_factory = gtk4::SignalListItemFactory::new();
+        selected_factory.connect_setup(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+            let label = gtk4::Label::new(None);
+            label.set_xalign(0.0);
+            label.set_valign(gtk4::Align::Center);
+            list_item.set_child(Some(&label));
+        });
+        selected_factory.connect_bind(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+            let item = list_item.item().and_downcast::<ProfileItem>();
+            let label = list_item.child().and_downcast::<gtk4::Label>();
+
+            if let (Some(profile), Some(label)) = (item, label) {
+                label.set_label(&profile.description());
+            }
+        });
+        row.set_factory(Some(&selected_factory));
+
+        // List factory (dropdown) - label + checkmark
+        let list_factory = gtk4::SignalListItemFactory::new();
+        list_factory.connect_setup(|_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+
+            let label = gtk4::Label::new(None);
+            label.set_xalign(0.0);
+            label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            label.set_width_chars(1);
+            label.set_valign(gtk4::Align::Center);
+            label.set_hexpand(true);
+            hbox.append(&label);
+
+            let checkmark = gtk4::Image::from_icon_name("object-select-symbolic");
+            checkmark.set_opacity(0.0);
+            hbox.append(&checkmark);
+
+            list_item.set_child(Some(&hbox));
+        });
+
+        let row_weak = row.downgrade();
+        list_factory.connect_bind(move |_, list_item| {
+            let list_item = list_item.downcast_ref::<gtk4::ListItem>().unwrap();
+            let item = list_item.item().and_downcast::<ProfileItem>();
+            let hbox = list_item.child().and_downcast::<gtk4::Box>();
+
+            if let (Some(profile), Some(hbox)) = (item, hbox) {
+                let label = hbox.first_child().and_downcast::<gtk4::Label>();
+                let checkmark = hbox.last_child().and_downcast::<gtk4::Image>();
+
+                if let Some(label) = label {
+                    label.set_label(&profile.description());
+                }
+
+                if let (Some(checkmark), Some(row)) = (checkmark.clone(), row_weak.upgrade()) {
+                    let list_item_for_notify = list_item.clone();
+                    let checkmark_for_notify = checkmark.clone();
+                    row.connect_selected_item_notify(move |row| {
+                        let is_selected =
+                            row.selected_item().as_ref() == list_item_for_notify.item().as_ref();
+                        checkmark_for_notify.set_opacity(if is_selected { 1.0 } else { 0.0 });
+                    });
+
                     let is_selected = row.selected_item().as_ref() == list_item.item().as_ref();
                     checkmark.set_opacity(if is_selected { 1.0 } else { 0.0 });
                 }
@@ -324,6 +405,44 @@ impl SoundContent {
                         }
                     }
                 }
+
+                this.refresh_profile_rows();
+            }
+        ));
+
+        // Profile selection
+        imp.output_profile_row.connect_selected_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |row| {
+                let imp = this.imp();
+                if imp.updating_ui.get() {
+                    return;
+                }
+
+                let daemon_ref = imp.daemon.borrow();
+                let Some(daemon) = daemon_ref.as_ref() else {
+                    return;
+                };
+
+                let Some(device) = this.get_selected_output() else {
+                    return;
+                };
+
+                let Some(device_id) = this.device_id_from_device(&device) else {
+                    return;
+                };
+
+                let Some(profile_item) = row.selected_item().and_downcast::<ProfileItem>() else {
+                    return;
+                };
+
+                if this.active_profile_index(device_id) == Some(profile_item.index()) {
+                    return;
+                }
+
+                daemon.set_profile(device_id, profile_item.index());
+                this.set_active_profile_override(device_id, profile_item.index());
             }
         ));
     }
@@ -396,6 +515,44 @@ impl SoundContent {
                         }
                     }
                 }
+
+                this.refresh_profile_rows();
+            }
+        ));
+
+        // Profile selection
+        imp.input_profile_row.connect_selected_notify(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |row| {
+                let imp = this.imp();
+                if imp.updating_ui.get() {
+                    return;
+                }
+
+                let daemon_ref = imp.daemon.borrow();
+                let Some(daemon) = daemon_ref.as_ref() else {
+                    return;
+                };
+
+                let Some(device) = this.get_selected_input() else {
+                    return;
+                };
+
+                let Some(device_id) = this.device_id_from_device(&device) else {
+                    return;
+                };
+
+                let Some(profile_item) = row.selected_item().and_downcast::<ProfileItem>() else {
+                    return;
+                };
+
+                if this.active_profile_index(device_id) == Some(profile_item.index()) {
+                    return;
+                }
+
+                daemon.set_profile(device_id, profile_item.index());
+                this.set_active_profile_override(device_id, profile_item.index());
             }
         ));
     }
@@ -445,6 +602,9 @@ impl SoundContent {
             }
             AudioEvent::DefaultChanged(device_type, id) => {
                 self.update_default(device_type, id);
+            }
+            AudioEvent::ProfilesUpdated(device_id, profiles, active_index) => {
+                self.handle_profiles_updated(device_id, profiles, active_index);
             }
             AudioEvent::PeakLevel(device_type, level) => {
                 self.update_peak_level(device_type, level);
@@ -510,6 +670,8 @@ impl SoundContent {
                 }
             }
         }
+
+        self.refresh_profile_rows();
     }
 
     fn remove_device(&self, id: u32) {
@@ -526,6 +688,7 @@ impl SoundContent {
                     imp.output_group.set_visible(false);
                     imp.output_no_devices_group.set_visible(true);
                 }
+                self.refresh_profile_rows();
                 return;
             }
         }
@@ -543,6 +706,8 @@ impl SoundContent {
                 }
             }
         }
+
+        self.refresh_profile_rows();
     }
 
     fn update_device(&self, info: &crate::services::pipewire::DeviceInfo) {
@@ -634,6 +799,163 @@ impl SoundContent {
         }
 
         imp.updating_ui.set(false);
+
+        // Update profile rows to reflect newly selected device
+        self.refresh_profile_rows();
+    }
+
+    fn handle_profiles_updated(
+        &self,
+        device_id: u32,
+        profiles: Vec<ProfileInfo>,
+        active_index: Option<u32>,
+    ) {
+        let imp = self.imp();
+        {
+            let mut profiles_map = imp.profiles.borrow_mut();
+            let resolved_active = active_index.or_else(|| {
+                profiles_map
+                    .get(&device_id)
+                    .and_then(|state| state.active_index)
+            });
+            profiles_map.insert(
+                device_id,
+                ProfileState {
+                    profiles,
+                    active_index: resolved_active,
+                },
+            );
+        }
+
+        self.refresh_profile_rows();
+    }
+
+    fn refresh_profile_rows(&self) {
+        self.update_profile_row(DeviceType::Sink);
+        self.update_profile_row(DeviceType::Source);
+    }
+
+    fn set_active_profile_override(&self, device_id: u32, profile_index: u32) {
+        let imp = self.imp();
+        {
+            let mut profiles_map = imp.profiles.borrow_mut();
+            if let Some(state) = profiles_map.get_mut(&device_id) {
+                state.active_index = Some(profile_index);
+            }
+        }
+        self.refresh_profile_rows();
+    }
+
+    fn update_profile_row(&self, device_type: DeviceType) {
+        let imp = self.imp();
+
+        let (row, store, selected_device) = match device_type {
+            DeviceType::Sink => (
+                &imp.output_profile_row,
+                &imp.output_profiles,
+                self.get_selected_output(),
+            ),
+            DeviceType::Source => (
+                &imp.input_profile_row,
+                &imp.input_profiles,
+                self.get_selected_input(),
+            ),
+        };
+
+        let Some(device) = selected_device else {
+            row.set_visible(false);
+            store.borrow_mut().remove_all();
+            return;
+        };
+
+        let Some(device_id) = self.device_id_from_device(&device) else {
+            row.set_visible(false);
+            store.borrow_mut().remove_all();
+            return;
+        };
+
+        let profile_device_index = self.profile_device_index_from_device(&device);
+
+        let profiles_state = {
+            let profiles = imp.profiles.borrow();
+            profiles.get(&device_id).cloned()
+        };
+
+        let Some(mut profiles_state) = profiles_state else {
+            row.set_visible(false);
+            store.borrow_mut().remove_all();
+            return;
+        };
+
+        let active_index = profiles_state.active_index;
+
+        // Filter profiles for this device/direction
+        profiles_state.profiles.retain(|profile| {
+            let is_active = active_index == Some(profile.index);
+            let available = profile.is_available() || is_active;
+            let supports = profile.supports_device(device_type, profile_device_index) || is_active;
+            available && supports
+        });
+
+        if profiles_state.profiles.len() <= 1 {
+            row.set_visible(false);
+            store.borrow_mut().remove_all();
+            return;
+        }
+
+        // Sort by priority (descending) then label
+        profiles_state.profiles.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then_with(|| a.display_name().cmp(b.display_name()))
+        });
+
+        imp.updating_ui.set(true);
+        {
+            let store = store.borrow_mut();
+            store.remove_all();
+            for profile in &profiles_state.profiles {
+                store.append(&ProfileItem::from_info(profile));
+            }
+        }
+
+        // Select active profile if known
+        if let Some(active_index) = profiles_state.active_index {
+            let store = store.borrow();
+            let mut selected = gtk4::INVALID_LIST_POSITION;
+            for i in 0..store.n_items() {
+                if let Some(item) = store.item(i) {
+                    if let Some(profile) = item.downcast_ref::<ProfileItem>() {
+                        if profile.index() == active_index {
+                            selected = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            if selected == gtk4::INVALID_LIST_POSITION {
+                // Keep current selection if possible to avoid flicker on transient profile updates.
+                let current = row.selected();
+                if current != gtk4::INVALID_LIST_POSITION && current < store.n_items() {
+                    row.set_selected(current);
+                } else {
+                    row.set_selected(selected);
+                }
+            } else {
+                row.set_selected(selected);
+            }
+        } else {
+            let store = store.borrow();
+            let current = row.selected();
+            if current != gtk4::INVALID_LIST_POSITION && current < store.n_items() {
+                row.set_selected(current);
+            } else {
+                row.set_selected(gtk4::INVALID_LIST_POSITION);
+            }
+        }
+        imp.updating_ui.set(false);
+
+        row.set_visible(true);
     }
 
     fn update_output_controls(&self, device: &AudioDevice) {
@@ -732,6 +1054,32 @@ impl SoundContent {
             .and_then(|item| item.downcast::<AudioDevice>().ok())
     }
 
+    fn device_id_from_device(&self, device: &AudioDevice) -> Option<u32> {
+        let device_id = device.device_id();
+        if device_id >= 0 {
+            Some(device_id as u32)
+        } else {
+            None
+        }
+    }
+
+    fn profile_device_index_from_device(&self, device: &AudioDevice) -> Option<u32> {
+        let index = device.profile_device_index();
+        if index >= 0 {
+            Some(index as u32)
+        } else {
+            None
+        }
+    }
+
+    fn active_profile_index(&self, device_id: u32) -> Option<u32> {
+        let imp = self.imp();
+        imp.profiles
+            .borrow()
+            .get(&device_id)
+            .and_then(|state| state.active_index)
+    }
+
     fn find_device_position(&self, store: &gio::ListStore, id: u32) -> Option<u32> {
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i) {
@@ -794,7 +1142,9 @@ fn get_device_icon(device: &AudioDevice) -> String {
         return "audio-card-symbolic".to_string();
     }
     // Virtual/filter output devices get a different icon
-    if device.is_sink() && (name.contains("effect") || name.contains("filter") || desc.contains("virtual")) {
+    if device.is_sink()
+        && (name.contains("effect") || name.contains("filter") || desc.contains("virtual"))
+    {
         return "audio-card-symbolic".to_string();
     }
 

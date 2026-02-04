@@ -35,6 +35,13 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                   </object>
                 </child>
                 <child>
+                  <object class="AdwComboRow" id="output_profile_row">
+                    <property name="title">Configuration</property>
+                    <property name="use-underline">true</property>
+                    <property name="visible">false</property>
+                  </object>
+                </child>
+                <child>
                   <object class="AdwPreferencesRow">
                     <property name="activatable">false</property>
                     <child>
@@ -120,6 +127,13 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                   <object class="AdwComboRow" id="input_device_row">
                     <property name="title">Input Device</property>
                     <property name="use-underline">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwComboRow" id="input_profile_row">
+                    <property name="title">Configuration</property>
+                    <property name="use-underline">true</property>
+                    <property name="visible">false</property>
                   </object>
                 </child>
                 <child>

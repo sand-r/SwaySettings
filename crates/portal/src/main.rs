@@ -56,7 +56,9 @@ impl SettingsPortal {
         if namespace == APPEARANCE_NAMESPACE && key == ACCENT_COLOR {
             return Ok(accent_color_value());
         }
-        Err(zbus::fdo::Error::Failed("Requested setting not found".into()))
+        Err(zbus::fdo::Error::Failed(
+            "Requested setting not found".into(),
+        ))
     }
 }
 

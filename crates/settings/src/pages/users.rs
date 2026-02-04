@@ -151,10 +151,7 @@ impl UsersContent {
         imp.popover_flowbox.append(&add_button);
 
         // Add predefined avatars from system directories
-        let avatar_dirs = [
-            "/usr/share/plasma/avatars",
-            "/usr/share/pixmaps/faces",
-        ];
+        let avatar_dirs = ["/usr/share/plasma/avatars", "/usr/share/pixmaps/faces"];
 
         for dir in avatar_dirs {
             self.add_avatars_from_directory(dir, 0, 3);
@@ -246,8 +243,11 @@ impl UsersContent {
         imp.title.set_text(&real_name);
         imp.title_entry.set_text(&real_name);
         imp.subtitle.set_text(&username);
-        imp.subtitle2
-            .set_text(if is_root_user() { "Root User" } else { "Regular User" });
+        imp.subtitle2.set_text(if is_root_user() {
+            "Root User"
+        } else {
+            "Regular User"
+        });
     }
 
     fn load_avatar_image(&self, username: &str) {
@@ -416,8 +416,7 @@ impl UsersContent {
 
                 // Update the avatar display
                 let file = gio::File::for_path(&face_path);
-                let paintable =
-                    gtk4::IconPaintable::for_file(&file, obj.imp().avatar.size(), 1);
+                let paintable = gtk4::IconPaintable::for_file(&file, obj.imp().avatar.size(), 1);
                 obj.imp().avatar.set_custom_image(Some(&paintable));
 
                 // Update AccountsService

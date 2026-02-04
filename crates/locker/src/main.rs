@@ -100,16 +100,19 @@ fn build_lock_window(app: &libadwaita::Application, monitor: &gdk4::Monitor) -> 
     let date_label = window.date_label();
 
     update_time_labels(&time_label, &date_label);
-    glib::timeout_add_seconds_local(60, clone!(
-        #[strong]
-        time_label,
-        #[strong]
-        date_label,
-        move || {
-            update_time_labels(&time_label, &date_label);
-            glib::ControlFlow::Continue
-        }
-    ));
+    glib::timeout_add_seconds_local(
+        60,
+        clone!(
+            #[strong]
+            time_label,
+            #[strong]
+            date_label,
+            move || {
+                update_time_labels(&time_label, &date_label);
+                glib::ControlFlow::Continue
+            }
+        ),
+    );
 
     LockWindow { window, entry }
 }
@@ -140,7 +143,9 @@ fn pam_authenticate_credentials(service: &str, username: &str, password: &str) -
 
         let mut handle: *mut PamHandle = ptr::null_mut();
         let pw = CString::new(password).unwrap_or_default();
-        let data = PamConvData { password: pw.as_ptr() };
+        let data = PamConvData {
+            password: pw.as_ptr(),
+        };
         let conv = PamConv {
             conv: Some(pam_conversation),
             appdata_ptr: &data as *const PamConvData as *mut _,
@@ -176,7 +181,14 @@ struct PamResponse {
 
 #[repr(C)]
 struct PamConv {
-    conv: Option<extern "C" fn(i32, *mut *const PamMessage, *mut *mut PamResponse, *mut std::ffi::c_void) -> i32>,
+    conv: Option<
+        extern "C" fn(
+            i32,
+            *mut *const PamMessage,
+            *mut *mut PamResponse,
+            *mut std::ffi::c_void,
+        ) -> i32,
+    >,
     appdata_ptr: *mut std::ffi::c_void,
 }
 
@@ -194,7 +206,12 @@ const PAM_REFRESH_CRED: i32 = 0x10;
 
 #[link(name = "pam")]
 extern "C" {
-    fn pam_start(service_name: *const i8, user: *const i8, conv: *const PamConv, pamh: *mut *mut PamHandle) -> i32;
+    fn pam_start(
+        service_name: *const i8,
+        user: *const i8,
+        conv: *const PamConv,
+        pamh: *mut *mut PamHandle,
+    ) -> i32;
     #[link_name = "pam_authenticate"]
     fn pam_authenticate_raw(pamh: *mut PamHandle, flags: i32) -> i32;
     fn pam_setcred(pamh: *mut PamHandle, flags: i32) -> i32;
@@ -211,7 +228,8 @@ extern "C" fn pam_conversation(
         if num_msg <= 0 {
             return PAM_SUCCESS;
         }
-        let responses = libc::calloc(num_msg as usize, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
+        let responses =
+            libc::calloc(num_msg as usize, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
         if responses.is_null() {
             return PAM_SUCCESS;
         }

@@ -18,10 +18,7 @@ pub const AGENT_CAPABILITY: &str = "DisplayYesNo";
 #[derive(Debug, Clone)]
 pub enum AgentRequest {
     /// Request confirmation of a passkey (user sees passkey, confirms on both devices).
-    RequestConfirmation {
-        device_path: String,
-        passkey: u32,
-    },
+    RequestConfirmation { device_path: String, passkey: u32 },
     /// Display a passkey that the user should enter on the remote device.
     DisplayPasskey {
         device_path: String,
@@ -34,14 +31,9 @@ pub enum AgentRequest {
         pincode: String,
     },
     /// Request authorization for pairing (no passkey).
-    RequestAuthorization {
-        device_path: String,
-    },
+    RequestAuthorization { device_path: String },
     /// Authorize a service UUID.
-    AuthorizeService {
-        device_path: String,
-        uuid: String,
-    },
+    AuthorizeService { device_path: String, uuid: String },
     /// Cancel the current request.
     Cancel,
 }
@@ -188,9 +180,7 @@ impl BluezAgent {
                 );
             }
             "DisplayPinCode" => {
-                if let Some((device_path, pincode)) =
-                    params.get::<(ObjectPath, String)>()
-                {
+                if let Some((device_path, pincode)) = params.get::<(ObjectPath, String)>() {
                     let request = AgentRequest::DisplayPinCode {
                         device_path: device_path.to_string(),
                         pincode,
@@ -217,9 +207,7 @@ impl BluezAgent {
                 invocation.return_value(None);
             }
             "RequestConfirmation" => {
-                if let Some((device_path, passkey)) =
-                    params.get::<(ObjectPath, u32)>()
-                {
+                if let Some((device_path, passkey)) = params.get::<(ObjectPath, u32)>() {
                     let request = AgentRequest::RequestConfirmation {
                         device_path: device_path.to_string(),
                         passkey,
@@ -233,16 +221,11 @@ impl BluezAgent {
                     if accepted {
                         invocation.return_value(None);
                     } else {
-                        invocation.return_error(
-                            gio::IOErrorEnum::Cancelled,
-                            "Pairing rejected by user",
-                        );
+                        invocation
+                            .return_error(gio::IOErrorEnum::Cancelled, "Pairing rejected by user");
                     }
                 } else {
-                    invocation.return_error(
-                        gio::IOErrorEnum::InvalidArgument,
-                        "Invalid arguments",
-                    );
+                    invocation.return_error(gio::IOErrorEnum::InvalidArgument, "Invalid arguments");
                 }
             }
             "RequestAuthorization" => {
@@ -265,16 +248,11 @@ impl BluezAgent {
                         );
                     }
                 } else {
-                    invocation.return_error(
-                        gio::IOErrorEnum::InvalidArgument,
-                        "Invalid arguments",
-                    );
+                    invocation.return_error(gio::IOErrorEnum::InvalidArgument, "Invalid arguments");
                 }
             }
             "AuthorizeService" => {
-                if let Some((device_path, uuid)) =
-                    params.get::<(ObjectPath, String)>()
-                {
+                if let Some((device_path, uuid)) = params.get::<(ObjectPath, String)>() {
                     let request = AgentRequest::AuthorizeService {
                         device_path: device_path.to_string(),
                         uuid,
@@ -294,10 +272,7 @@ impl BluezAgent {
                         );
                     }
                 } else {
-                    invocation.return_error(
-                        gio::IOErrorEnum::InvalidArgument,
-                        "Invalid arguments",
-                    );
+                    invocation.return_error(gio::IOErrorEnum::InvalidArgument, "Invalid arguments");
                 }
             }
             "Cancel" => {

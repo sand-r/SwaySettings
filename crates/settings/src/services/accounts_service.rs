@@ -91,14 +91,12 @@ impl AccountsServiceUser {
     ///
     /// The callback will be invoked when any user property changes.
     pub fn connect_changed<F: Fn() + 'static>(&self, callback: F) {
-        let handler_id = self.proxy.connect_local(
-            "g-properties-changed",
-            false,
-            move |_values| {
+        let handler_id = self
+            .proxy
+            .connect_local("g-properties-changed", false, move |_values| {
                 callback();
                 None
-            },
-        );
+            });
         *self.changed_handler_id.borrow_mut() = Some(handler_id);
     }
 

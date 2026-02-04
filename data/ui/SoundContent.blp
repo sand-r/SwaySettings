@@ -28,6 +28,12 @@ template $SwaySettingsSoundContent: Adw.Bin {
           use-underline: true;
         }
 
+        Adw.ComboRow output_profile_row {
+          title: "Configuration";
+          use-underline: true;
+          visible: false;
+        }
+
         Adw.PreferencesRow {
           activatable: false;
 
@@ -107,6 +113,12 @@ template $SwaySettingsSoundContent: Adw.Bin {
         Adw.ComboRow input_device_row {
           title: "Input Device";
           use-underline: true;
+        }
+
+        Adw.ComboRow input_profile_row {
+          title: "Configuration";
+          use-underline: true;
+          visible: false;
         }
 
         Adw.PreferencesRow {

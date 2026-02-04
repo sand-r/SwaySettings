@@ -142,8 +142,8 @@ impl StorageRowData {
         filesystem: &FilesystemProxy<'_>,
     ) -> Option<Self> {
         let total_size = block.size().await.unwrap_or(0);
-        let total_str = glib::format_size_full(total_size, glib::FormatSizeFlags::IEC_UNITS)
-            .to_string();
+        let total_str =
+            glib::format_size_full(total_size, glib::FormatSizeFlags::IEC_UNITS).to_string();
 
         let mut removable = false;
         let mut icon = DEVICE_ICON_DRIVE.to_string();
@@ -154,7 +154,8 @@ impl StorageRowData {
         }
 
         if let Ok(drive) = client.drive_for_block(block).await {
-            if drive.media_removable().await.unwrap_or(false) || drive.removable().await.unwrap_or(false)
+            if drive.media_removable().await.unwrap_or(false)
+                || drive.removable().await.unwrap_or(false)
             {
                 removable = true;
                 icon = DEVICE_ICON_REMOVABLE_DRIVE.to_string();
@@ -167,11 +168,7 @@ impl StorageRowData {
             }
         }
 
-        let type_label = block
-            .id_type()
-            .await
-            .unwrap_or_default()
-            .to_uppercase();
+        let type_label = block.id_type().await.unwrap_or_default().to_uppercase();
         let type_display = if type_label.is_empty() {
             "Unknown".to_string()
         } else {
@@ -234,7 +231,9 @@ fn bytes_to_string(bytes: Vec<u8>) -> Option<String> {
     if bytes.is_empty() {
         return None;
     }
-    let value = String::from_utf8_lossy(&bytes).trim_end_matches('\0').to_string();
+    let value = String::from_utf8_lossy(&bytes)
+        .trim_end_matches('\0')
+        .to_string();
     if value.is_empty() {
         None
     } else {

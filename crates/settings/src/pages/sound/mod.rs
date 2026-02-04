@@ -1,5 +1,6 @@
 mod audio_device;
 mod content;
+mod profile_item;
 
 use content::SoundContent;
 use gtk4::prelude::*;

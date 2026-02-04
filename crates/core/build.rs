@@ -33,7 +33,10 @@ fn main() {
     println!("cargo:rerun-if-changed={}", gresource.display());
     println!("cargo:rerun-if-changed={}", style_dir.display());
     println!("cargo:rerun-if-changed={}", data_dir.join("ui").display());
-    println!("cargo:rerun-if-changed={}", data_dir.join("icons").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        data_dir.join("icons").display()
+    );
 
     let gresource_str = gresource.to_string_lossy().to_string();
     glib_build_tools::compile_resources(&[data_dir], &gresource_str, "swaysettings.gresource");

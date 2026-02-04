@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
 use std::io::Cursor;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use pipewire as pw;
 use pipewire::context::ContextRc;
@@ -16,15 +18,37 @@ use pipewire::spa::pod::deserialize::PodDeserializer;
 use pipewire::spa::pod::serialize::PodSerializer;
 use pipewire::spa::pod::{Object, Pod, Property, PropertyFlags, Value, ValueArray};
 use pipewire::spa::sys::{
-    SPA_PARAM_Props, SPA_PROP_channelVolumes, SPA_PROP_mute, SPA_PROP_volume,
-    SPA_TYPE_OBJECT_Props,
-    // Route param constants
-    SPA_PARAM_ROUTE_direction, SPA_PARAM_ROUTE_name,
-    SPA_PARAM_ROUTE_description, SPA_PARAM_ROUTE_available, SPA_PARAM_ROUTE_devices,
     // Availability values: unknown=0, no=1, yes=2
     SPA_PARAM_AVAILABILITY_no,
+    SPA_PARAM_PROFILE_available,
+    SPA_PARAM_PROFILE_classes,
+    SPA_PARAM_PROFILE_description,
+    SPA_PARAM_PROFILE_index,
+    SPA_PARAM_PROFILE_name,
+    SPA_PARAM_PROFILE_priority,
+    SPA_PARAM_PROFILE_save,
+    SPA_PARAM_Profile,
+    SPA_PARAM_Props,
+    SPA_PARAM_Route,
+    SPA_PARAM_ROUTE_available,
+    SPA_PARAM_ROUTE_description,
+    SPA_PARAM_ROUTE_device,
+    SPA_PARAM_ROUTE_devices,
+    SPA_PARAM_ROUTE_index,
+    // Route param constants
+    SPA_PARAM_ROUTE_direction,
+    SPA_PARAM_ROUTE_name,
+    SPA_PARAM_ROUTE_props,
+    SPA_PARAM_ROUTE_save,
+    SPA_PROP_channelVolumes,
+    SPA_PROP_mute,
+    SPA_PROP_volume,
+    SPA_TYPE_OBJECT_ParamRoute,
+    SPA_TYPE_OBJECT_ParamProfile,
+    SPA_TYPE_OBJECT_Props,
     // Direction values
-    SPA_DIRECTION_INPUT, SPA_DIRECTION_OUTPUT,
+    SPA_DIRECTION_INPUT,
+    SPA_DIRECTION_OUTPUT,
 };
 use pipewire::spa::utils::Direction;
 use pipewire::stream::{StreamBox, StreamFlags, StreamListener};
@@ -46,6 +70,13 @@ impl DeviceType {
     }
 }
 
+fn pw_debug_enabled(flag: &str) -> bool {
+    env::var("SWAYSETTINGS_PW_DEBUG")
+        .ok()
+        .map(|value| value.split(',').any(|item| item.trim() == flag))
+        .unwrap_or(false)
+}
+
 /// Information about an audio device
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
@@ -57,6 +88,56 @@ pub struct DeviceInfo {
     pub is_muted: bool,
     pub is_default: bool,
     pub device_type: DeviceType,
+    pub device_id: Option<u32>,
+    pub profile_device_index: Option<u32>,
+}
+
+/// Information about a device profile
+#[derive(Debug, Clone)]
+pub struct ProfileInfo {
+    pub index: u32,
+    pub name: String,
+    pub description: String,
+    pub priority: i32,
+    pub available: u32,
+    pub sink_devices: Vec<u32>,
+    pub source_devices: Vec<u32>,
+}
+
+impl ProfileInfo {
+    pub fn display_name(&self) -> &str {
+        if self.description.is_empty() {
+            &self.name
+        } else {
+            &self.description
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.available != SPA_PARAM_AVAILABILITY_no
+    }
+
+    pub fn supports_device(&self, device_type: DeviceType, device_index: Option<u32>) -> bool {
+        if let Some(device_index) = device_index {
+            if self.sink_devices.is_empty() && self.source_devices.is_empty() {
+                return true;
+            }
+            return match device_type {
+                DeviceType::Sink => self.sink_devices.iter().any(|d| *d == device_index),
+                DeviceType::Source => self.source_devices.iter().any(|d| *d == device_index),
+            };
+        }
+
+        // If we don't know the device index, fall back to class presence.
+        if self.sink_devices.is_empty() && self.source_devices.is_empty() {
+            return true;
+        }
+
+        match device_type {
+            DeviceType::Sink => !self.sink_devices.is_empty(),
+            DeviceType::Source => !self.source_devices.is_empty(),
+        }
+    }
 }
 
 /// Events sent from the PipeWire thread to the main GTK thread
@@ -67,6 +148,7 @@ pub enum AudioEvent {
     DeviceRemoved(u32),
     DeviceChanged(DeviceInfo),
     DefaultChanged(DeviceType, Option<u32>),
+    ProfilesUpdated(u32, Vec<ProfileInfo>, Option<u32>),
     /// Peak level update (device_type, level 0.0-1.0)
     PeakLevel(DeviceType, f32),
     Error(String),
@@ -79,6 +161,7 @@ enum AudioCommand {
     SetMute(u32, bool),
     SetDefaultSink(u32),
     SetDefaultSource(u32),
+    SetProfile(u32, u32),
     Shutdown,
 }
 
@@ -137,6 +220,13 @@ impl AudioDaemon {
     pub fn set_default_source(&self, id: u32) {
         let _ = self.command_tx.send(AudioCommand::SetDefaultSource(id));
     }
+
+    /// Set the active profile on a device (card)
+    pub fn set_profile(&self, device_id: u32, profile_index: u32) {
+        let _ = self
+            .command_tx
+            .send(AudioCommand::SetProfile(device_id, profile_index));
+    }
 }
 
 impl Drop for AudioDaemon {
@@ -151,8 +241,14 @@ struct DeviceState {
     node: pipewire::node::Node,
     _listener: pipewire::node::NodeListener,
     channel_count: u32,
-    /// Whether this node is visible in the GUI (based on route availability)
+    /// Whether this node is allowed to be shown in the GUI (filters like bluetooth loopback)
+    show_in_ui: bool,
+    /// Whether this node is currently visible in the GUI (based on route availability)
     visible: bool,
+    /// Whether this node is an internal node (Audio/*/Internal)
+    is_internal: bool,
+    /// Driver node id (used for Bluetooth loopback nodes)
+    driver_id: Option<u32>,
     /// Route match key for availability matching (profile description or nick)
     route_key: String,
     /// Route device index for availability matching (card.profile.device)
@@ -170,6 +266,8 @@ struct MetadataState {
 /// Route availability info from a PipeWire Device
 #[derive(Debug, Clone)]
 struct RouteInfo {
+    index: i32,
+    device: i32,
     name: String,
     #[allow(dead_code)]
     description: String,
@@ -184,6 +282,17 @@ struct PwDeviceState {
     device: pipewire::device::Device,
     _listener: pipewire::device::DeviceListener,
 }
+
+/// Profile state for a PipeWire device
+#[derive(Default, Clone)]
+struct ProfileState {
+    profiles: HashMap<u32, ProfileInfo>,
+    active_index: Option<u32>,
+    pending_index: Option<u32>,
+    pending_since: Option<Instant>,
+}
+
+const PROFILE_PENDING_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// State for peak level monitoring stream
 struct PeakMonitorState<F: Fn(AudioEvent) + 'static> {
@@ -250,7 +359,11 @@ where
     let stream = match StreamBox::new(core_ref, stream_name, props) {
         Ok(s) => s,
         Err(e) => {
-            log::warn!("Failed to create peak monitor stream for {:?}: {}", device_type, e);
+            log::warn!(
+                "Failed to create peak monitor stream for {:?}: {}",
+                device_type,
+                e
+            );
             return None;
         }
     };
@@ -281,9 +394,8 @@ where
                         if let Some(slice) = data.data() {
                             if slice.len() >= 4 {
                                 // Peak data is a single f32 value
-                                let peak = f32::from_ne_bytes([
-                                    slice[0], slice[1], slice[2], slice[3]
-                                ]);
+                                let peak =
+                                    f32::from_ne_bytes([slice[0], slice[1], slice[2], slice[3]]);
                                 log::trace!("Peak {:?}: {}", user_data.device_type, peak);
                                 (user_data.event_callback)(AudioEvent::PeakLevel(
                                     user_data.device_type,
@@ -308,11 +420,11 @@ where
     };
 
     // Build audio format params for the stream - mono F32 at 25Hz for peak detection
-    use pw::spa::pod::{object, property};
-    use pw::spa::param::format::{FormatProperties, MediaType, MediaSubtype};
     use pw::spa::param::audio::AudioFormat;
-    use pw::spa::utils::SpaTypes;
+    use pw::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
     use pw::spa::param::ParamType;
+    use pw::spa::pod::{object, property};
+    use pw::spa::utils::SpaTypes;
 
     let format_obj = object!(
         SpaTypes::ObjectParamFormat,
@@ -324,12 +436,10 @@ where
         property!(FormatProperties::AudioChannels, Int, 1),
     );
 
-    let format_bytes: Vec<u8> = PodSerializer::serialize(
-        Cursor::new(Vec::new()),
-        &Value::Object(format_obj),
-    )
-    .map(|r| r.0.into_inner())
-    .unwrap_or_default();
+    let format_bytes: Vec<u8> =
+        PodSerializer::serialize(Cursor::new(Vec::new()), &Value::Object(format_obj))
+            .map(|r| r.0.into_inner())
+            .unwrap_or_default();
 
     let format_pod = match Pod::from_bytes(&format_bytes) {
         Some(p) => p,
@@ -351,7 +461,11 @@ where
         return None;
     }
 
-    log::info!("Created peak monitor for {:?}, stream state: {:?}", device_type, stream.state());
+    log::info!(
+        "Created peak monitor for {:?}, stream state: {:?}",
+        device_type,
+        stream.state()
+    );
 
     Some(PeakMonitorState { stream, listener })
 }
@@ -380,10 +494,13 @@ where
     let default_source_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let metadata_state: Rc<RefCell<Option<MetadataState>>> = Rc::new(RefCell::new(None));
     // PipeWire Device objects (sound cards)
-    let pw_devices: Rc<RefCell<HashMap<u32, PwDeviceState>>> = Rc::new(RefCell::new(HashMap::new()));
+    let pw_devices: Rc<RefCell<HashMap<u32, PwDeviceState>>> =
+        Rc::new(RefCell::new(HashMap::new()));
     // Route availability info: device_id -> Vec<RouteInfo>
     let route_availability: Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>> =
         Rc::new(RefCell::new(HashMap::new()));
+    // Profile info per device (card)
+    let profiles: Rc<RefCell<HashMap<u32, ProfileState>>> = Rc::new(RefCell::new(HashMap::new()));
 
     // Clone for closures - each closure that captures with `move` needs its own clone
     let nodes_for_global = nodes.clone();
@@ -393,10 +510,14 @@ where
     let default_source_name_for_global = default_source_name.clone();
     let metadata_state_for_global = metadata_state.clone();
     let metadata_state_for_commands = metadata_state.clone();
+    let pw_devices_for_commands = pw_devices.clone();
     let pw_devices_for_global = pw_devices.clone();
     let route_availability_for_global = route_availability.clone();
     let route_availability_for_nodes = route_availability.clone();
+    let route_availability_for_commands = route_availability.clone();
     let nodes_for_route_check = nodes.clone();
+    let profiles_for_global = profiles.clone();
+    let profiles_for_commands = profiles.clone();
     let registry_for_global = registry.clone();
 
     // Wrap callback in Rc for sharing
@@ -405,10 +526,12 @@ where
     let event_callback_for_remove = event_callback.clone();
     let event_callback_for_params = event_callback.clone();
     let event_callback_for_route_check = event_callback.clone();
+    let event_callback_for_commands = event_callback.clone();
 
     // Create peak monitoring streams for output and input
     let _sink_peak_monitor = create_peak_monitor(core, DeviceType::Sink, event_callback.clone());
-    let _source_peak_monitor = create_peak_monitor(core, DeviceType::Source, event_callback.clone());
+    let _source_peak_monitor =
+        create_peak_monitor(core, DeviceType::Source, event_callback.clone());
 
     // Registry listener for global objects
     let _registry_listener = registry
@@ -435,6 +558,7 @@ where
                     &registry_for_global,
                     &pw_devices_for_global,
                     &route_availability_for_global,
+                    &profiles_for_global,
                     &nodes_for_route_check,
                     event_callback_for_route_check.clone(),
                 );
@@ -480,33 +604,56 @@ where
 
     // Attach receiver to the loop
     let loop_ = main_loop.loop_();
-    let _receiver_handle = pw_receiver.attach(&loop_, move |cmd| {
-        match cmd {
-            AudioCommand::Shutdown => {
-                *should_quit_clone.borrow_mut() = true;
-            }
-            AudioCommand::SetVolume(id, volume) => {
-                set_node_volume(&nodes_for_commands, id, volume);
-            }
-            AudioCommand::SetMute(id, muted) => {
-                set_node_mute(&nodes_for_commands, id, muted);
-            }
-            AudioCommand::SetDefaultSink(id) => {
-                set_default_device(
-                    &nodes_for_commands,
-                    &metadata_state_for_commands,
-                    id,
-                    DeviceType::Sink,
-                );
-            }
-            AudioCommand::SetDefaultSource(id) => {
-                set_default_device(
-                    &nodes_for_commands,
-                    &metadata_state_for_commands,
-                    id,
-                    DeviceType::Source,
-                );
-            }
+    let _receiver_handle = pw_receiver.attach(&loop_, move |cmd| match cmd {
+        AudioCommand::Shutdown => {
+            *should_quit_clone.borrow_mut() = true;
+        }
+        AudioCommand::SetVolume(id, volume) => {
+            set_node_volume(
+                &nodes_for_commands,
+                &pw_devices_for_commands,
+                &route_availability_for_commands,
+                id,
+                volume,
+            );
+        }
+        AudioCommand::SetMute(id, muted) => {
+            set_node_mute(
+                &nodes_for_commands,
+                &pw_devices_for_commands,
+                &route_availability_for_commands,
+                id,
+                muted,
+            );
+        }
+        AudioCommand::SetDefaultSink(id) => {
+            set_default_device(
+                &nodes_for_commands,
+                &pw_devices_for_commands,
+                &route_availability_for_commands,
+                &metadata_state_for_commands,
+                id,
+                DeviceType::Sink,
+            );
+        }
+        AudioCommand::SetDefaultSource(id) => {
+            set_default_device(
+                &nodes_for_commands,
+                &pw_devices_for_commands,
+                &route_availability_for_commands,
+                &metadata_state_for_commands,
+                id,
+                DeviceType::Source,
+            );
+        }
+        AudioCommand::SetProfile(device_id, profile_index) => {
+            set_device_profile(
+                &pw_devices_for_commands,
+                &profiles_for_commands,
+                device_id,
+                profile_index,
+                event_callback_for_commands.as_ref(),
+            );
         }
     });
 
@@ -547,6 +694,14 @@ fn handle_node_added<F>(
         None => return,
     };
 
+    let is_internal = media_class.contains("/Internal");
+
+    let prop_is_true = |key: &str| matches!(props.get(key), Some("true") | Some("1"));
+    let bluez_loopback =
+        prop_is_true("bluez5.sink-loopback") || prop_is_true("bluez5.source-loopback");
+    let bluez_loopback_target = prop_is_true("bluez5.sink-loopback-target")
+        || prop_is_true("bluez5.source-loopback-target");
+
     let device_type = if media_class.starts_with("Audio/Sink") {
         DeviceType::Sink
     } else if media_class.starts_with("Audio/Source") {
@@ -563,6 +718,13 @@ fn handle_node_added<F>(
         return;
     }
 
+    let is_bluez_output = name.starts_with("bluez_output.");
+    let is_bluez_input = name.starts_with("bluez_input.");
+    let is_bluez_output_internal = name.starts_with("bluez_output_internal.");
+    let is_bluez_input_internal = name.starts_with("bluez_input_internal.");
+    let is_bluez_wrapper = is_bluez_output || is_bluez_input;
+    let is_bluez_internal = is_bluez_output_internal || is_bluez_input_internal;
+
     // Prefer profile description or node nick for route matching
     // (these correspond to PipeWire route descriptions like "HDMI / DisplayPort 1 Output")
     let profile_desc = props.get("device.profile.description");
@@ -575,19 +737,24 @@ fn handle_node_added<F>(
         (_, Some(c)) if !c.is_empty() => c.to_string(),
         _ => name.clone(),
     };
+    let description_for_match = description.clone();
 
     // Get icon name from PipeWire (e.g., "audio-speakers", "audio-headphones", "video-display")
     let icon_name = props.get("device.icon_name").map(|s| s.to_string());
 
     // Log all properties to understand what PipeWire provides
-    log::debug!("Node {} properties:", name);
-    for (key, value) in props.iter() {
-        log::debug!("  {}: {}", key, value);
+    if pw_debug_enabled("props") {
+        log::info!("PW-PROPS Node {} properties:", name);
+        for (key, value) in props.iter() {
+            log::info!("  {}: {}", key, value);
+        }
     }
 
     // Get parent device ID for route availability matching
-    let parent_device_id = props
-        .get("device.id")
+    let parent_device_id = props.get("device.id").and_then(|s| s.parse::<u32>().ok());
+
+    let driver_id = props
+        .get("node.driver-id")
         .and_then(|s| s.parse::<u32>().ok());
 
     // Store the route match key for availability matching
@@ -603,8 +770,28 @@ fn handle_node_added<F>(
         .get("card.profile.device")
         .and_then(|s| s.parse::<u32>().ok());
 
+    // Decide whether this node should ever be shown in the UI.
+    // Bluetooth devices expose loopback + internal nodes; prefer the loopback target (internal)
+    // and hide the loopback wrapper nodes.
+    let show_in_ui = if bluez_loopback {
+        false
+    } else if is_internal {
+        bluez_loopback_target
+    } else {
+        true
+    };
+
+    log::debug!(
+        "Node {} visibility decision: internal={} bluez_loopback={} target={} show_in_ui={}",
+        name,
+        is_internal,
+        bluez_loopback,
+        bluez_loopback_target,
+        show_in_ui
+    );
+
     // Check initial route availability
-    let mut initially_visible = true;
+    let mut initially_visible = show_in_ui;
     if let Some(device_id) = parent_device_id {
         let routes = route_availability.borrow();
         if let Some(device_routes) = routes.get(&device_id) {
@@ -616,7 +803,9 @@ fn handle_node_added<F>(
             let route_info = route_device_index
                 .and_then(|idx| {
                     device_routes.iter().find(|r| {
-                        r.direction == expected_direction && r.devices.iter().any(|d| *d == idx)
+                        r.direction == expected_direction
+                            && (r.device == idx as i32
+                                || r.devices.iter().any(|d| *d == idx))
                     })
                 })
                 .or_else(|| find_matching_route(device_routes, &route_key, expected_direction));
@@ -657,6 +846,8 @@ fn handle_node_added<F>(
         is_muted: false,
         is_default,
         device_type,
+        device_id: parent_device_id,
+        profile_device_index: route_device_index,
     };
 
     let node: pipewire::node::Node = match registry.bind(global) {
@@ -672,8 +863,86 @@ fn handle_node_added<F>(
     let default_source_name_for_listener = default_source_name.clone();
     let name_for_listener = name.clone();
 
+    let nodes_for_info = nodes.clone();
     let listener = node
         .add_listener_local()
+        .info(move |info| {
+            let Some(props) = info.props() else { return };
+
+            let mut nodes_mut = nodes_for_info.borrow_mut();
+            let Some(state) = nodes_mut.get_mut(&id) else { return };
+
+            if state.route_device_index.is_none() {
+                if let Some(idx) = props
+                    .get("card.profile.device")
+                    .and_then(|s| s.parse::<u32>().ok())
+                {
+                    state.route_device_index = Some(idx);
+                    state.info.profile_device_index = Some(idx);
+                    if pw_debug_enabled("volume") {
+                        log::info!(
+                            "VOL-DBG node {} updated route_device_index={}",
+                            state.info.id,
+                            idx
+                        );
+                    }
+                }
+            }
+
+            let is_bluez_node = state.info.name.starts_with("bluez_");
+            if is_bluez_node && state.driver_id.is_none() {
+                if let Some(driver_id) = props
+                    .get("node.driver-id")
+                    .and_then(|s| s.parse::<u32>().ok())
+                {
+                    state.driver_id = Some(driver_id);
+                    if pw_debug_enabled("volume") {
+                        log::info!(
+                            "VOL-DBG node {} updated driver_id={}",
+                            state.info.id,
+                            driver_id
+                        );
+                    }
+                }
+            }
+
+            if state.parent_device_id.is_none() {
+                if let Some(device_id) = props.get("device.id").and_then(|s| s.parse::<u32>().ok()) {
+                    state.parent_device_id = Some(device_id);
+                    state.info.device_id = Some(device_id);
+                    if pw_debug_enabled("volume") {
+                        log::info!(
+                            "VOL-DBG node {} updated parent_device_id={}",
+                            state.info.id,
+                            device_id
+                        );
+                    }
+                }
+            }
+
+            if state.route_key.is_empty() {
+                let profile_desc = props.get("device.profile.description");
+                let nick = props.get("node.nick");
+                let card_desc = props.get("node.description");
+                let route_key = profile_desc
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| nick.filter(|s| !s.is_empty()))
+                    .or_else(|| card_desc.filter(|s| !s.is_empty()))
+                    .unwrap_or("")
+                    .to_string();
+
+                if !route_key.is_empty() {
+                    state.route_key = route_key.clone();
+                    if pw_debug_enabled("volume") {
+                        log::info!(
+                            "VOL-DBG node {} updated route_key='{}'",
+                            state.info.id,
+                            route_key
+                        );
+                    }
+                }
+            }
+        })
         .param(move |_seq, param_type, _index, _next, param| {
             if param_type != ParamType::Props {
                 return;
@@ -682,14 +951,46 @@ fn handle_node_added<F>(
             let Some(pod) = param else { return };
 
             if let Some((volume, muted, channel_count)) = parse_audio_props(pod) {
+                let mut changed_infos: Vec<DeviceInfo> = Vec::new();
                 let mut devs = nodes_for_listener.borrow_mut();
                 if let Some(state) = devs.get_mut(&id) {
-                    let changed = (state.info.volume - volume).abs() > 0.001
-                        || state.info.is_muted != muted;
+                    log::debug!(
+                        "Props for node {} ({}): vol={:.3} muted={} channels={} internal={} driver_id={:?}",
+                        id,
+                        state.info.description,
+                        volume,
+                        muted,
+                        channel_count,
+                        state.is_internal,
+                        state.driver_id
+                    );
 
-                    state.info.volume = volume;
-                    state.info.is_muted = muted;
                     state.channel_count = channel_count;
+
+                    // Skip volume updates from follower nodes (Bluetooth loopbacks)
+                    let ignore_volume = !state.is_internal && state.driver_id.is_some();
+                    if ignore_volume {
+                        log::debug!(
+                            "Ignoring volume update for follower node {} (driver_id {:?})",
+                            id,
+                            state.driver_id
+                        );
+                    }
+
+                    if !ignore_volume {
+                        let volume_delta = (state.info.volume - volume).abs();
+                        let near_zero = state.info.volume <= 0.001 || volume <= 0.001;
+                        let changed = volume_delta > 0.001
+                            || (near_zero && volume_delta > 0.0)
+                            || state.info.is_muted != muted;
+
+                        state.info.volume = volume;
+                        state.info.is_muted = muted;
+
+                        if changed {
+                            changed_infos.push(state.info.clone());
+                        }
+                    }
 
                     // Update is_default based on name comparison
                     let is_default = match state.info.device_type {
@@ -704,30 +1005,58 @@ fn handle_node_added<F>(
                     };
                     state.info.is_default = is_default;
 
-                    if changed {
+                    // If this is an internal node, propagate volume/mute to follower nodes
+                    if state.is_internal {
+                        let driver_id = state.info.id;
                         log::debug!(
-                            "Device {} ({}) changed: vol={:.2}, muted={}",
-                            state.info.description,
-                            state.info.device_type.name(),
-                            volume,
-                            muted
+                            "Propagating internal volume from node {} to followers",
+                            driver_id
                         );
-                        event_callback_rc(AudioEvent::DeviceChanged(state.info.clone()));
+                        for follower in devs.values_mut() {
+                            if follower.driver_id == Some(driver_id) {
+                                let volume_delta = (follower.info.volume - volume).abs();
+                                let near_zero =
+                                    follower.info.volume <= 0.001 || volume <= 0.001;
+                                let changed = volume_delta > 0.001
+                                    || (near_zero && volume_delta > 0.0)
+                                    || follower.info.is_muted != muted;
+                                follower.info.volume = volume;
+                                follower.info.is_muted = muted;
+                                if changed {
+                                    changed_infos.push(follower.info.clone());
+                                }
+                            }
+                        }
                     }
+                }
+                drop(devs);
+
+                for info in changed_infos {
+                    log::debug!(
+                        "Device {} ({}) changed: vol={:.2}, muted={}",
+                        info.description,
+                        info.device_type.name(),
+                        info.volume,
+                        info.is_muted
+                    );
+                    event_callback_rc(AudioEvent::DeviceChanged(info));
                 }
             }
         })
         .register();
 
     node.subscribe_params(&[ParamType::Props]);
+    // Fetch initial volume/mute values (some nodes don't emit Props immediately)
+    node.enum_params(0, Some(ParamType::Props), 0, u32::MAX);
 
     log::debug!(
-        "Added {} device: {} (id={}, default={}, visible={})",
+        "Added {} device: {} (id={}, default={}, visible={}, show_in_ui={})",
         device_type.name(),
         info.description,
         id,
         is_default,
-        initially_visible
+        initially_visible,
+        show_in_ui
     );
 
     let state = DeviceState {
@@ -735,13 +1064,89 @@ fn handle_node_added<F>(
         node,
         _listener: listener,
         channel_count: 2,
+        show_in_ui,
         visible: initially_visible,
+        is_internal,
+        driver_id,
         route_key,
         route_device_index,
         parent_device_id,
     };
+    let mut nodes_mut = nodes.borrow_mut();
+    nodes_mut.insert(id, state);
 
-    nodes.borrow_mut().insert(id, state);
+    // For Bluetooth devices, map the visible wrapper node to the internal node that carries volume.
+    if is_bluez_internal {
+        let driver_id = id;
+        for other in nodes_mut.values_mut() {
+            if other.is_internal {
+                continue;
+            }
+
+            if other.parent_device_id != parent_device_id {
+                continue;
+            }
+
+            if other.info.device_type != device_type {
+                continue;
+            }
+
+            let other_name = &other.info.name;
+            let is_wrapper = other_name.starts_with("bluez_output.")
+                || other_name.starts_with("bluez_input.");
+
+            if !is_wrapper {
+                continue;
+            }
+
+            if other.info.description != description_for_match {
+                continue;
+            }
+
+            other.driver_id = Some(driver_id);
+            log::debug!(
+                "Linked BlueZ wrapper {} -> internal node {} for volume control",
+                other.info.name,
+                driver_id
+            );
+        }
+    } else if is_bluez_wrapper && driver_id.is_none() {
+        if let Some(internal_id) = nodes_mut.values().find_map(|state| {
+            if !state.is_internal {
+                return None;
+            }
+
+            if state.parent_device_id != parent_device_id {
+                return None;
+            }
+
+            if state.info.device_type != device_type {
+                return None;
+            }
+
+            let internal_name = &state.info.name;
+            let is_internal_bluez = internal_name.starts_with("bluez_output_internal.")
+                || internal_name.starts_with("bluez_input_internal.");
+            if !is_internal_bluez {
+                return None;
+            }
+
+            if state.info.description != description_for_match {
+                return None;
+            }
+
+            Some(state.info.id)
+        }) {
+            if let Some(wrapper_state) = nodes_mut.get_mut(&id) {
+                wrapper_state.driver_id = Some(internal_id);
+                log::debug!(
+                    "Linked BlueZ wrapper {} -> internal node {} for volume control",
+                    wrapper_state.info.name,
+                    internal_id
+                );
+            }
+        }
+    }
 
     // Only notify GUI if initially visible
     if initially_visible {
@@ -764,6 +1169,31 @@ fn find_matching_route<'a>(
         .find(|r| r.direction == expected_direction && route_matches_key(r, route_key))
 }
 
+fn find_route_for_state<'a>(
+    state: &DeviceState,
+    routes: &'a [RouteInfo],
+) -> Option<&'a RouteInfo> {
+    let expected_direction = match state.info.device_type {
+        DeviceType::Sink => SPA_DIRECTION_OUTPUT,
+        DeviceType::Source => SPA_DIRECTION_INPUT,
+    };
+
+    let mut route = None;
+
+    if let Some(idx) = state.route_device_index {
+        route = routes.iter().find(|r| {
+            r.direction == expected_direction
+                && (r.device == idx as i32 || r.devices.iter().any(|d| *d == idx))
+        });
+    }
+
+    if route.is_none() && !state.route_key.is_empty() {
+        route = find_matching_route(routes, &state.route_key, expected_direction);
+    }
+
+    route
+}
+
 /// Update node visibility based on route availability and emit events
 fn update_node_visibility<F>(
     nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
@@ -777,6 +1207,9 @@ fn update_node_visibility<F>(
 
     let mut nodes_mut = nodes.borrow_mut();
     for state in nodes_mut.values_mut() {
+        if !state.show_in_ui {
+            continue;
+        }
         // Only check nodes belonging to this device
         if state.parent_device_id != Some(device_id) {
             continue;
@@ -793,7 +1226,8 @@ fn update_node_visibility<F>(
 
         // Check if this node matches the route
         let matches = if let Some(idx) = state.route_device_index {
-            route_info.devices.iter().any(|d| *d == idx)
+            route_info.device == idx as i32
+                || route_info.devices.iter().any(|d| *d == idx)
         } else if !state.route_key.is_empty() {
             route_matches_key(route_info, &state.route_key)
         } else {
@@ -857,6 +1291,7 @@ fn handle_pw_device_added<F>(
     registry: &pipewire::registry::Registry,
     pw_devices: &Rc<RefCell<HashMap<u32, PwDeviceState>>>,
     route_availability: &Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>>,
+    profiles: &Rc<RefCell<HashMap<u32, ProfileState>>>,
     nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
     event_callback: Rc<F>,
 ) where
@@ -867,11 +1302,7 @@ fn handle_pw_device_added<F>(
         None => return,
     };
 
-    // Only interested in ALSA devices (sound cards)
     let device_name = props.get("device.name").unwrap_or("");
-    if !device_name.starts_with("alsa_card") {
-        return;
-    }
 
     log::debug!("Found PipeWire Device: {} (id={})", device_name, global.id);
 
@@ -885,6 +1316,7 @@ fn handle_pw_device_added<F>(
 
     let device_id = global.id;
     let route_availability_for_listener = route_availability.clone();
+    let profiles_for_listener = profiles.clone();
     let nodes_for_listener = nodes.clone();
     let event_callback_for_listener = event_callback;
 
@@ -895,21 +1327,97 @@ fn handle_pw_device_added<F>(
             // Device info received, routes will come via param callback
         })
         .param(move |_seq, param_type, _index, _next, param| {
-            // Handle both EnumRoute (initial enumeration) and Route (dynamic updates)
-            if param_type == ParamType::EnumRoute || param_type == ParamType::Route {
-                if let Some(pod) = param {
-                    if let Some(route_info) = parse_route_param(pod) {
-                        log::debug!(
-                            "Device {} route: name='{}', direction={}, available={}",
+            if let Some(pod) = param {
+                if param_type == ParamType::EnumProfile {
+                    if let Some(profile) = parse_profile_param(pod) {
+                        let profile_index = profile.index;
+                        let mut profiles_map = profiles_for_listener.borrow_mut();
+                        let entry = profiles_map.entry(device_id).or_default();
+                        entry.profiles.insert(profile_index, profile);
+                        if pw_debug_enabled("profile") {
+                            if let Some(info) = entry.profiles.get(&profile_index) {
+                                log::info!(
+                                    "PROFILE-DBG enum device={} idx={} name='{}' desc='{}' avail={} prio={} sinks={:?} sources={:?}",
+                                    device_id,
+                                    info.index,
+                                    info.name,
+                                    info.description,
+                                    info.available,
+                                    info.priority,
+                                    info.sink_devices,
+                                    info.source_devices
+                                );
+                            }
+                        }
+                        maybe_clear_pending_profile(entry, entry.active_index, device_id);
+                        emit_profiles_update(
                             device_id,
-                            route_info.name,
-                            if route_info.direction == SPA_DIRECTION_OUTPUT {
-                                "output"
-                            } else {
-                                "input"
-                            },
-                            route_info.available
+                            entry,
+                            event_callback_for_listener.as_ref(),
                         );
+                    }
+                } else if param_type == ParamType::Profile {
+                    let mut profiles_map = profiles_for_listener.borrow_mut();
+                    let entry = profiles_map.entry(device_id).or_default();
+
+                    if let Some(profile) = parse_profile_param(pod) {
+                        let profile_index = profile.index;
+                        entry.active_index = Some(profile_index);
+                        entry.profiles.entry(profile_index).or_insert(profile);
+                        if pw_debug_enabled("profile") {
+                            if let Some(info) = entry.profiles.get(&profile_index) {
+                                log::info!(
+                                    "PROFILE-DBG active device={} idx={} name='{}' desc='{}' avail={} prio={} sinks={:?} sources={:?}",
+                                    device_id,
+                                    info.index,
+                                    info.name,
+                                    info.description,
+                                    info.available,
+                                    info.priority,
+                                    info.sink_devices,
+                                    info.source_devices
+                                );
+                            }
+                        }
+                        maybe_clear_pending_profile(entry, Some(profile_index), device_id);
+                    } else if let Some(active_index) = parse_profile_index(pod) {
+                        entry.active_index = Some(active_index);
+                        if pw_debug_enabled("profile") {
+                            log::info!(
+                                "PROFILE-DBG active device={} idx={} (index only)",
+                                device_id,
+                                active_index
+                            );
+                        }
+                        maybe_clear_pending_profile(entry, Some(active_index), device_id);
+                    }
+
+                    emit_profiles_update(device_id, entry, event_callback_for_listener.as_ref());
+                } else if param_type == ParamType::EnumRoute || param_type == ParamType::Route {
+                    if let Some(route_info) = parse_route_param(pod) {
+                        if pw_debug_enabled("volume") {
+                            log::info!(
+                                "VOL-DBG route param device={} idx={} dev={} dir={} avail={} name='{}'",
+                                device_id,
+                                route_info.index,
+                                route_info.device,
+                                route_info.direction,
+                                route_info.available,
+                                route_info.name
+                            );
+                        } else {
+                            log::debug!(
+                                "Device {} route: name='{}', direction={}, available={}",
+                                device_id,
+                                route_info.name,
+                                if route_info.direction == SPA_DIRECTION_OUTPUT {
+                                    "output"
+                                } else {
+                                    "input"
+                                },
+                                route_info.available
+                            );
+                        }
 
                         // Update node visibility based on route availability
                         update_node_visibility(
@@ -924,11 +1432,11 @@ fn handle_pw_device_added<F>(
                         let device_routes = routes.entry(device_id).or_insert_with(Vec::new);
 
                         // Update existing route or add new one
-                        if let Some(existing) = device_routes
-                            .iter_mut()
-                            .find(|r| r.name == route_info.name && r.direction == route_info.direction)
-                        {
-                            existing.available = route_info.available;
+                        if let Some(existing) = device_routes.iter_mut().find(|r| {
+                            r.direction == route_info.direction
+                                && (r.index == route_info.index && r.device == route_info.device)
+                        }) {
+                            *existing = route_info;
                         } else {
                             device_routes.push(route_info);
                         }
@@ -938,8 +1446,17 @@ fn handle_pw_device_added<F>(
         })
         .register();
 
-    // Subscribe to both EnumRoute (initial) and Route (dynamic changes)
-    device.subscribe_params(&[ParamType::EnumRoute, ParamType::Route]);
+    // Subscribe to profiles and routes for all devices (route volumes are used by WirePlumber)
+    let mut params = vec![ParamType::EnumProfile, ParamType::Profile];
+    params.push(ParamType::EnumRoute);
+    params.push(ParamType::Route);
+    device.subscribe_params(&params);
+
+    // Explicitly enumerate initial params so we have route/profile data immediately
+    device.enum_params(0, Some(ParamType::EnumProfile), 0, u32::MAX);
+    device.enum_params(0, Some(ParamType::Profile), 0, u32::MAX);
+    device.enum_params(0, Some(ParamType::EnumRoute), 0, u32::MAX);
+    device.enum_params(0, Some(ParamType::Route), 0, u32::MAX);
 
     let state = PwDeviceState {
         device,
@@ -960,6 +1477,8 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
         return None;
     };
 
+    let mut index: i32 = -1;
+    let mut device: i32 = -1;
     let mut name = String::new();
     let mut description = String::new();
     let mut direction: u32 = 0;
@@ -973,38 +1492,46 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
                     name = s;
                 }
             }
+            k if k == SPA_PARAM_ROUTE_index => match prop.value {
+                Value::Int(i) => index = i,
+                Value::Id(id) => index = id.0 as i32,
+                _ => {}
+            },
+            k if k == SPA_PARAM_ROUTE_device => match prop.value {
+                Value::Int(i) => device = i,
+                Value::Id(id) => device = id.0 as i32,
+                _ => {}
+            },
             k if k == SPA_PARAM_ROUTE_description => {
                 if let Value::String(s) = prop.value {
                     description = s;
                 }
             }
-            k if k == SPA_PARAM_ROUTE_direction => {
-                if let Value::Id(id) = prop.value {
-                    direction = id.0;
+            k if k == SPA_PARAM_ROUTE_direction => match prop.value {
+                Value::Id(id) => direction = id.0,
+                Value::Int(i) => direction = i as u32,
+                _ => {}
+            },
+            k if k == SPA_PARAM_ROUTE_available => match prop.value {
+                Value::Id(id) => available = id.0,
+                Value::Int(i) => available = i as u32,
+                _ => {}
+            },
+            k if k == SPA_PARAM_ROUTE_devices => match prop.value {
+                Value::ValueArray(ValueArray::Int(vals)) => {
+                    devices = vals.iter().map(|v| *v as u32).collect();
                 }
-            }
-            k if k == SPA_PARAM_ROUTE_available => {
-                if let Value::Id(id) = prop.value {
-                    available = id.0;
+                Value::ValueArray(ValueArray::Id(vals)) => {
+                    devices = vals.iter().map(|v| v.0).collect();
                 }
-            }
-            k if k == SPA_PARAM_ROUTE_devices => {
-                match prop.value {
-                    Value::ValueArray(ValueArray::Int(vals)) => {
-                        devices = vals.iter().map(|v| *v as u32).collect();
-                    }
-                    Value::ValueArray(ValueArray::Id(vals)) => {
-                        devices = vals.iter().map(|v| v.0).collect();
-                    }
-                    _ => {}
-                }
-            }
+                _ => {}
+            },
             _ => {}
         }
     }
 
     if name.is_empty() {
-        return None;
+        name = format!("route-{}-{}", direction, device);
     }
 
     // Strip [Out] or [In] prefix from route names
@@ -1016,6 +1543,8 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
         .to_string();
 
     Some(RouteInfo {
+        index,
+        device,
         name,
         description,
         direction,
@@ -1024,10 +1553,210 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
     })
 }
 
+/// Parse a Profile param pod to extract profile info
+fn parse_profile_param(pod: &Pod) -> Option<ProfileInfo> {
+    let value = match PodDeserializer::deserialize_any_from(pod.as_bytes()) {
+        Ok((_, val)) => val,
+        Err(_) => return None,
+    };
+
+    let Value::Object(obj) = value else {
+        return None;
+    };
+
+    let mut index: Option<u32> = None;
+    let mut name = String::new();
+    let mut description = String::new();
+    let mut priority: i32 = 0;
+    let mut available: u32 = 0;
+    let mut sink_devices: Vec<u32> = Vec::new();
+    let mut source_devices: Vec<u32> = Vec::new();
+
+    for prop in obj.properties {
+        match prop.key {
+            k if k == SPA_PARAM_PROFILE_index => {
+                match prop.value {
+                    Value::Int(v) => index = Some(v as u32),
+                    Value::Id(id) => index = Some(id.0),
+                    _ => {}
+                }
+            }
+            k if k == SPA_PARAM_PROFILE_name => {
+                if let Value::String(s) = prop.value {
+                    name = s;
+                }
+            }
+            k if k == SPA_PARAM_PROFILE_description => {
+                if let Value::String(s) = prop.value {
+                    description = s;
+                }
+            }
+            k if k == SPA_PARAM_PROFILE_priority => {
+                if let Value::Int(v) = prop.value {
+                    priority = v;
+                }
+            }
+            k if k == SPA_PARAM_PROFILE_available => match prop.value {
+                Value::Id(id) => available = id.0,
+                Value::Int(v) => available = v as u32,
+                _ => {}
+            },
+            k if k == SPA_PARAM_PROFILE_classes => {
+                let (sinks, sources) = parse_profile_classes(&prop.value);
+                sink_devices = sinks;
+                source_devices = sources;
+            }
+            _ => {}
+        }
+    }
+
+    let index = index?;
+    if description.is_empty() {
+        description = name.clone();
+    }
+
+    Some(ProfileInfo {
+        index,
+        name,
+        description,
+        priority,
+        available,
+        sink_devices,
+        source_devices,
+    })
+}
+
+fn parse_profile_index(pod: &Pod) -> Option<u32> {
+    let value = match PodDeserializer::deserialize_any_from(pod.as_bytes()) {
+        Ok((_, val)) => val,
+        Err(_) => return None,
+    };
+
+    let Value::Object(obj) = value else {
+        return None;
+    };
+
+    for prop in obj.properties {
+        if prop.key == SPA_PARAM_PROFILE_index {
+            match prop.value {
+                Value::Int(v) => return Some(v as u32),
+                Value::Id(id) => return Some(id.0),
+                _ => {}
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_profile_classes(value: &Value) -> (Vec<u32>, Vec<u32>) {
+    let Value::Struct(items) = value else {
+        return (Vec::new(), Vec::new());
+    };
+
+    let mut iter = items.iter();
+    let (count, mut entries_iter): (usize, Box<dyn Iterator<Item = &Value>>) = match iter.next() {
+        Some(Value::Int(v)) => (*v as usize, Box::new(iter)),
+        Some(Value::String(_)) => (items.len() / 4, Box::new(items.iter())),
+        _ => return (Vec::new(), Vec::new()),
+    };
+
+    let mut sink_devices = Vec::new();
+    let mut source_devices = Vec::new();
+
+    for _ in 0..count {
+        let entry_values: Vec<&Value> = match entries_iter.next() {
+            Some(Value::Struct(entry)) => entry.iter().collect(),
+            Some(first) => {
+                let mut vals = vec![first];
+                for _ in 0..3 {
+                    if let Some(next) = entries_iter.next() {
+                        vals.push(next);
+                    }
+                }
+                vals
+            }
+            None => break,
+        };
+
+        if entry_values.len() < 4 {
+            continue;
+        }
+
+        let class_name = match entry_values[0] {
+            Value::String(s) => s.as_str(),
+            _ => continue,
+        };
+
+        let device_indices: Vec<u32> = match entry_values[3] {
+            Value::ValueArray(ValueArray::Int(vals)) => vals.iter().map(|v| *v as u32).collect(),
+            Value::ValueArray(ValueArray::Id(vals)) => vals.iter().map(|v| v.0).collect(),
+            _ => Vec::new(),
+        };
+
+        match class_name {
+            "Audio/Sink" => sink_devices.extend(device_indices),
+            "Audio/Source" => source_devices.extend(device_indices),
+            _ => {}
+        }
+    }
+
+    (sink_devices, source_devices)
+}
+
+fn maybe_clear_pending_profile(entry: &mut ProfileState, new_active: Option<u32>, device_id: u32) {
+    let Some(pending) = entry.pending_index else {
+        return;
+    };
+
+    if Some(pending) == new_active {
+        if pw_debug_enabled("profile") {
+            log::info!(
+                "PROFILE-DBG pending cleared device={} idx={} (matched active)",
+                device_id,
+                pending
+            );
+        }
+        entry.pending_index = None;
+        entry.pending_since = None;
+        return;
+    }
+
+    if let Some(since) = entry.pending_since {
+        if since.elapsed() > PROFILE_PENDING_TIMEOUT {
+            if pw_debug_enabled("profile") {
+                log::info!(
+                    "PROFILE-DBG pending cleared device={} idx={} (timeout)",
+                    device_id,
+                    pending
+                );
+            }
+            entry.pending_index = None;
+            entry.pending_since = None;
+        }
+    }
+}
+
+fn emit_profiles_update<F>(device_id: u32, state: &ProfileState, callback: &F)
+where
+    F: Fn(AudioEvent),
+{
+    let mut profiles: Vec<ProfileInfo> = state.profiles.values().cloned().collect();
+    profiles.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| a.display_name().cmp(b.display_name()))
+    });
+
+    let active_index = state.pending_index.or(state.active_index);
+    callback(AudioEvent::ProfilesUpdated(device_id, profiles, active_index));
+}
+
 /// Parse volume and mute from Props pod
 /// Returns None if no volume/mute properties found (to avoid overwriting with defaults)
 fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
-    let mut volume: Option<f64> = None;
+    let mut volume_prop: Option<f64> = None;
+    let mut channel_avg: Option<f64> = None;
     let mut muted: Option<bool> = None;
     let mut channel_count: u32 = 2;
 
@@ -1042,7 +1771,7 @@ fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
             match prop.key {
                 k if k == SPA_PROP_volume => {
                     if let Value::Float(v) = prop.value {
-                        volume = Some(v as f64);
+                        volume_prop = Some(v as f64);
                     }
                 }
                 k if k == SPA_PROP_mute => {
@@ -1055,7 +1784,7 @@ fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
                         channel_count = vols.len() as u32;
                         if !vols.is_empty() {
                             let avg: f32 = vols.iter().sum::<f32>() / vols.len() as f32;
-                            volume = Some(avg as f64);
+                            channel_avg = Some(avg as f64);
                         }
                     }
                 }
@@ -1063,6 +1792,8 @@ fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
             }
         }
     }
+
+    let volume = channel_avg.or(volume_prop);
 
     // Only return if we found at least volume or mute data
     if volume.is_some() || muted.is_some() {
@@ -1073,85 +1804,492 @@ fn parse_audio_props(pod: &Pod) -> Option<(f64, bool, u32)> {
 }
 
 /// Set volume for a node via PipeWire
-fn set_node_volume(nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, volume: f64) {
+fn set_node_volume(
+    nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    pw_devices: &Rc<RefCell<HashMap<u32, PwDeviceState>>>,
+    route_availability: &Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>>,
+    id: u32,
+    volume: f64,
+) {
     let devs = nodes.borrow();
     let Some(state) = devs.get(&id) else {
         log::warn!("set_node_volume: node {} not found", id);
         return;
     };
 
+    let driver_state = state
+        .driver_id
+        .and_then(|driver| devs.get(&driver));
+
+    let target_state = driver_state.unwrap_or(state);
     let volume_f32 = volume as f32;
-    let channel_count = state.channel_count.max(1) as usize;
-    let volumes: Vec<f32> = vec![volume_f32; channel_count];
+    let vol_debug = pw_debug_enabled("volume");
 
-    log::debug!(
-        "Setting volume for device {} ({}, {} channels): {:.3}",
-        id,
-        state.info.device_type.name(),
-        channel_count,
-        volume
-    );
+    if vol_debug {
+        log::info!(
+            "VOL-DBG request id={} name='{}' target={} parent_device={:?} route_device_index={:?} route_key='{}' type={:?}",
+            state.info.id,
+            state.info.name,
+            target_state.info.id,
+            target_state.parent_device_id,
+            target_state.route_device_index,
+            target_state.route_key,
+            target_state.info.device_type
+        );
+    }
 
-    // Build Props object with channelVolumes
-    let obj = Object {
-        type_: SPA_TYPE_OBJECT_Props,
-        id: SPA_PARAM_Props,
-        properties: vec![Property {
-            key: SPA_PROP_channelVolumes,
-            flags: PropertyFlags::empty(),
-            value: Value::ValueArray(ValueArray::Float(volumes)),
-        }],
-    };
+    // Try to set volume via device Route param (WirePlumber does this)
+    if let Some(device_id) = target_state.parent_device_id {
+        if let Some(routes) = route_availability.borrow().get(&device_id) {
+            if vol_debug {
+                log::info!("VOL-DBG cached routes for device {}:", device_id);
+                for route in routes {
+                    log::info!(
+                        "VOL-DBG cached route idx={} dev={} dir={} avail={} name='{}'",
+                        route.index,
+                        route.device,
+                        route.direction,
+                        route.available,
+                        route.name
+                    );
+                }
+            }
 
-    // Serialize to bytes
-    let mut buffer = vec![0u8; 512];
-    let result = PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(obj));
+            if let Some(route_info) = find_route_for_state(target_state, routes) {
+                if route_info.index >= 0 {
+                    if let Some(device_state) = pw_devices.borrow().get(&device_id) {
+                        let channel_count = target_state.channel_count.max(1) as usize;
+                        let volumes: Vec<f32> = vec![volume_f32; channel_count];
 
-    match result {
-        Ok((_, len)) => {
-            buffer.truncate(len as usize);
-            if let Some(pod) = Pod::from_bytes(&buffer) {
-                state.node.set_param(ParamType::Props, 0, pod);
+                        let route_device = if route_info.device >= 0 {
+                            route_info.device
+                        } else {
+                            target_state
+                                .route_device_index
+                                .map(|v| v as i32)
+                                .unwrap_or(-1)
+                        };
+
+                        if route_device < 0 {
+                            if vol_debug {
+                                log::info!(
+                                    "VOL-DBG route info missing device id: idx={} dev={}",
+                                    route_info.index,
+                                    route_info.device
+                                );
+                            }
+                        } else {
+                            if vol_debug {
+                                log::info!(
+                                    "VOL-DBG using route idx={} dev={} dir={} name='{}'",
+                                    route_info.index,
+                                    route_device,
+                                    route_info.direction,
+                                    route_info.name
+                                );
+                            } else {
+                                log::debug!(
+                                    "Setting volume via route for device {} (route index {}, device {}): {:.3}",
+                                    device_id,
+                                    route_info.index,
+                                    route_device,
+                                    volume
+                                );
+                            }
+
+                            let props_obj = Object {
+                                type_: SPA_TYPE_OBJECT_Props,
+                                id: SPA_PARAM_Props,
+                                properties: vec![
+                                    Property {
+                                        key: SPA_PROP_channelVolumes,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::ValueArray(ValueArray::Float(volumes)),
+                                    },
+                                    Property {
+                                        key: SPA_PROP_volume,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Float(volume_f32),
+                                    },
+                                ],
+                            };
+
+                            let route_obj = Object {
+                                type_: SPA_TYPE_OBJECT_ParamRoute,
+                                id: SPA_PARAM_Route,
+                                properties: vec![
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_index,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Int(route_info.index),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_device,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Int(route_device),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_props,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Object(props_obj),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_save,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Bool(true),
+                                    },
+                                ],
+                            };
+
+                            let mut buffer = vec![0u8; 512];
+                            let result =
+                                PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(route_obj));
+
+                            match result {
+                                Ok((_, len)) => {
+                                    buffer.truncate(len as usize);
+                                    if let Some(pod) = Pod::from_bytes(&buffer) {
+                                        device_state.device.set_param(ParamType::Route, 0, pod);
+                                        if vol_debug {
+                                            device_state
+                                                .device
+                                                .enum_params(0, Some(ParamType::Route), 0, u32::MAX);
+                                        }
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to serialize route volume pod: {:?}", e);
+                                }
+                            }
+                        }
+                    } else if vol_debug {
+                        log::info!(
+                            "VOL-DBG no PipeWire device state cached for device {}",
+                            device_id
+                        );
+                    }
+                } else if vol_debug {
+                    log::info!(
+                        "VOL-DBG route info missing index: idx={} dev={}",
+                        route_info.index,
+                        route_info.device
+                    );
+                }
+            } else if vol_debug {
+                log::info!(
+                    "VOL-DBG no matching route for target {} (route_device_index={:?}, route_key='{}')",
+                    target_state.info.id,
+                    target_state.route_device_index,
+                    target_state.route_key
+                );
+            }
+        } else if vol_debug {
+            log::info!("VOL-DBG no cached routes for device {}", device_id);
+        }
+    } else if vol_debug {
+        log::info!(
+            "VOL-DBG target {} has no parent device id (cannot set route)",
+            target_state.info.id
+        );
+    }
+
+    // Fallback: set node props directly
+    let apply_volume = |target_state: &DeviceState| {
+        let channel_count = target_state.channel_count.max(1) as usize;
+        let volumes: Vec<f32> = vec![volume_f32; channel_count];
+
+        let obj = Object {
+            type_: SPA_TYPE_OBJECT_Props,
+            id: SPA_PARAM_Props,
+            properties: vec![
+                Property {
+                    key: SPA_PROP_channelVolumes,
+                    flags: PropertyFlags::empty(),
+                    value: Value::ValueArray(ValueArray::Float(volumes)),
+                },
+                Property {
+                    key: SPA_PROP_volume,
+                    flags: PropertyFlags::empty(),
+                    value: Value::Float(volume_f32),
+                },
+            ],
+        };
+
+        let mut buffer = vec![0u8; 512];
+        let result = PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(obj));
+
+        match result {
+            Ok((_, len)) => {
+                buffer.truncate(len as usize);
+                if let Some(pod) = Pod::from_bytes(&buffer) {
+                    target_state.node.set_param(ParamType::Props, 0, pod);
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to serialize volume pod: {:?}", e);
             }
         }
-        Err(e) => {
-            log::error!("Failed to serialize volume pod: {:?}", e);
+    };
+
+    if let Some(driver) = driver_state {
+        log::debug!(
+            "Setting volume for device {} (target {}, {} channels): {:.3}",
+            id,
+            driver.info.id,
+            driver.channel_count.max(1),
+            volume
+        );
+        apply_volume(driver);
+
+        if driver.info.id != state.info.id {
+            log::debug!(
+                "Mirroring volume to wrapper device {} ({} channels): {:.3}",
+                state.info.id,
+                state.channel_count.max(1),
+                volume
+            );
+            apply_volume(state);
         }
+    } else {
+        log::debug!(
+            "Setting volume for device {} ({} channels): {:.3}",
+            id,
+            state.channel_count.max(1),
+            volume
+        );
+        apply_volume(state);
     }
 }
 
 /// Set mute state for a node via PipeWire
-fn set_node_mute(nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>, id: u32, muted: bool) {
+fn set_node_mute(
+    nodes: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    pw_devices: &Rc<RefCell<HashMap<u32, PwDeviceState>>>,
+    route_availability: &Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>>,
+    id: u32,
+    muted: bool,
+) {
     let devs = nodes.borrow();
     let Some(state) = devs.get(&id) else {
         log::warn!("set_node_mute: node {} not found", id);
         return;
     };
 
-    log::debug!("Setting mute for node {}: {}", id, muted);
+    let driver_state = state
+        .driver_id
+        .and_then(|driver| devs.get(&driver));
 
-    let obj = Object {
-        type_: SPA_TYPE_OBJECT_Props,
-        id: SPA_PARAM_Props,
-        properties: vec![Property {
-            key: SPA_PROP_mute,
-            flags: PropertyFlags::empty(),
-            value: Value::Bool(muted),
-        }],
+    let target_state = driver_state.unwrap_or(state);
+
+    // Try to set mute via device Route param (WirePlumber does this)
+    if let Some(device_id) = target_state.parent_device_id {
+        if let Some(routes) = route_availability.borrow().get(&device_id) {
+            if let Some(route_info) = find_route_for_state(target_state, routes) {
+                if route_info.index >= 0 {
+                    if let Some(device_state) = pw_devices.borrow().get(&device_id) {
+                        let route_device = if route_info.device >= 0 {
+                            route_info.device
+                        } else {
+                            target_state
+                                .route_device_index
+                                .map(|v| v as i32)
+                                .unwrap_or(-1)
+                        };
+
+                        if route_device >= 0 {
+                            log::debug!(
+                                "Setting mute via route for device {} (route index {}, device {}): {}",
+                                device_id,
+                                route_info.index,
+                                route_device,
+                                muted
+                            );
+
+                            let props_obj = Object {
+                                type_: SPA_TYPE_OBJECT_Props,
+                                id: SPA_PARAM_Props,
+                                properties: vec![Property {
+                                    key: SPA_PROP_mute,
+                                    flags: PropertyFlags::empty(),
+                                    value: Value::Bool(muted),
+                                }],
+                            };
+
+                            let route_obj = Object {
+                                type_: SPA_TYPE_OBJECT_ParamRoute,
+                                id: SPA_PARAM_Route,
+                                properties: vec![
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_index,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Int(route_info.index),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_device,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Int(route_device),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_props,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Object(props_obj),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_save,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Bool(true),
+                                    },
+                                ],
+                            };
+
+                            let mut buffer = vec![0u8; 256];
+                            let result =
+                                PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(route_obj));
+
+                            match result {
+                                Ok((_, len)) => {
+                                    buffer.truncate(len as usize);
+                                    if let Some(pod) = Pod::from_bytes(&buffer) {
+                                        device_state.device.set_param(ParamType::Route, 0, pod);
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to serialize route mute pod: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let apply_mute = |target_state: &DeviceState| {
+        let obj = Object {
+            type_: SPA_TYPE_OBJECT_Props,
+            id: SPA_PARAM_Props,
+            properties: vec![Property {
+                key: SPA_PROP_mute,
+                flags: PropertyFlags::empty(),
+                value: Value::Bool(muted),
+            }],
+        };
+
+        let mut buffer = vec![0u8; 128];
+        let result = PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(obj));
+
+        match result {
+            Ok((_, len)) => {
+                buffer.truncate(len as usize);
+                if let Some(pod) = Pod::from_bytes(&buffer) {
+                    target_state.node.set_param(ParamType::Props, 0, pod);
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to serialize mute pod: {:?}", e);
+            }
+        }
     };
 
-    let mut buffer = vec![0u8; 128];
+    if let Some(driver) = driver_state {
+        log::debug!(
+            "Setting mute for device {} (target {}): {}",
+            id,
+            driver.info.id,
+            muted
+        );
+        apply_mute(driver);
+
+        if driver.info.id != state.info.id {
+            log::debug!(
+                "Mirroring mute to wrapper device {}: {}",
+                state.info.id,
+                muted
+            );
+            apply_mute(state);
+        }
+    } else {
+        log::debug!("Setting mute for device {}: {}", id, muted);
+        apply_mute(state);
+    }
+}
+
+/// Set active profile for a device (card)
+fn set_device_profile<F>(
+    pw_devices: &Rc<RefCell<HashMap<u32, PwDeviceState>>>,
+    profiles: &Rc<RefCell<HashMap<u32, ProfileState>>>,
+    device_id: u32,
+    profile_index: u32,
+    event_callback: &F,
+) where
+    F: Fn(AudioEvent),
+{
+    let devices = pw_devices.borrow();
+    let Some(state) = devices.get(&device_id) else {
+        log::warn!("set_device_profile: device {} not found", device_id);
+        return;
+    };
+
+    log::debug!(
+        "Setting profile for device {} to index {}",
+        device_id,
+        profile_index
+    );
+
+    let updated_state = {
+        let mut profiles_map = profiles.borrow_mut();
+        let entry = profiles_map.entry(device_id).or_default();
+        entry.pending_index = Some(profile_index);
+        entry.pending_since = Some(Instant::now());
+        entry.clone()
+    };
+    if pw_debug_enabled("profile") {
+        log::info!(
+            "PROFILE-DBG pending device={} idx={} (user requested)",
+            device_id,
+            profile_index
+        );
+    }
+    emit_profiles_update(device_id, &updated_state, event_callback);
+
+    let obj = Object {
+        type_: SPA_TYPE_OBJECT_ParamProfile,
+        id: SPA_PARAM_Profile,
+        properties: vec![
+            Property {
+                key: SPA_PARAM_PROFILE_index,
+                flags: PropertyFlags::empty(),
+                value: Value::Int(profile_index as i32),
+            },
+            Property {
+                key: SPA_PARAM_PROFILE_save,
+                flags: PropertyFlags::empty(),
+                value: Value::Bool(true),
+            },
+        ],
+    };
+
+    let mut buffer = vec![0u8; 256];
     let result = PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(obj));
 
     match result {
         Ok((_, len)) => {
             buffer.truncate(len as usize);
             if let Some(pod) = Pod::from_bytes(&buffer) {
-                state.node.set_param(ParamType::Props, 0, pod);
+                state.device.set_param(ParamType::Profile, 0, pod);
+                // Refresh profile information after change (Bluetooth codecs may update availability)
+                state
+                    .device
+                    .enum_params(0, Some(ParamType::Profile), 0, u32::MAX);
+                state
+                    .device
+                    .enum_params(0, Some(ParamType::EnumProfile), 0, u32::MAX);
             }
         }
         Err(e) => {
-            log::error!("Failed to serialize mute pod: {:?}", e);
+            log::error!("Failed to serialize profile pod: {:?}", e);
         }
     }
 }
@@ -1290,6 +2428,8 @@ fn parse_metadata_name(json: &str) -> Option<String> {
 /// Set default device via metadata
 fn set_default_device(
     devices: &Rc<RefCell<HashMap<u32, DeviceState>>>,
+    pw_devices: &Rc<RefCell<HashMap<u32, PwDeviceState>>>,
+    route_availability: &Rc<RefCell<HashMap<u32, Vec<RouteInfo>>>>,
     metadata_state: &Rc<RefCell<Option<MetadataState>>>,
     id: u32,
     device_type: DeviceType,
@@ -1301,6 +2441,90 @@ fn set_default_device(
     };
 
     let device_name = state.info.name.clone();
+    let route_debug = pw_debug_enabled("route");
+
+    // Ensure the device route is activated so WirePlumber considers this node
+    // available when honoring default.configured.*
+    if let Some(device_id) = state.parent_device_id {
+        if let Some(routes) = route_availability.borrow().get(&device_id) {
+            if let Some(route_info) = find_route_for_state(state, routes) {
+                if route_info.index >= 0 {
+                    if let Some(device_state) = pw_devices.borrow().get(&device_id) {
+                        let route_device = if route_info.device >= 0 {
+                            route_info.device
+                        } else {
+                            state
+                                .route_device_index
+                                .map(|v| v as i32)
+                                .unwrap_or(-1)
+                        };
+
+                        if route_device >= 0 {
+                            if route_debug {
+                                log::info!(
+                                    "ROUTE-DBG selecting route for device {}: idx={} dev={} name='{}'",
+                                    device_id,
+                                    route_info.index,
+                                    route_device,
+                                    route_info.name
+                                );
+                            }
+
+                            let route_obj = Object {
+                                type_: SPA_TYPE_OBJECT_ParamRoute,
+                                id: SPA_PARAM_Route,
+                                properties: vec![
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_index,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Int(route_info.index),
+                                    },
+                                    Property {
+                                        key: SPA_PARAM_ROUTE_device,
+                                        flags: PropertyFlags::empty(),
+                                        value: Value::Int(route_device),
+                                    },
+                                ],
+                            };
+
+                            let mut buffer = vec![0u8; 256];
+                            if let Ok((_, len)) =
+                                PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(route_obj))
+                            {
+                                buffer.truncate(len as usize);
+                                if let Some(pod) = Pod::from_bytes(&buffer) {
+                                    device_state.device.set_param(ParamType::Route, 0, pod);
+                                }
+                            }
+                        } else if route_debug {
+                            log::info!(
+                                "ROUTE-DBG missing route device for id {} (route idx={})",
+                                device_id,
+                                route_info.index
+                            );
+                        }
+                    } else if route_debug {
+                        log::info!("ROUTE-DBG no PipeWire device for id {}", device_id);
+                    }
+                } else if route_debug {
+                    log::info!(
+                        "ROUTE-DBG no route index for device {} (route dev={})",
+                        device_id,
+                        route_info.device
+                    );
+                }
+            } else if route_debug {
+                log::info!(
+                    "ROUTE-DBG no matching route for node {} (device={}, key='{}')",
+                    state.info.id,
+                    device_id,
+                    state.route_key
+                );
+            }
+        } else if route_debug {
+            log::info!("ROUTE-DBG no cached routes for device {}", device_id);
+        }
+    }
     drop(devs);
 
     let meta_state = metadata_state.borrow();
@@ -1309,9 +2533,11 @@ fn set_default_device(
         return;
     };
 
+    // WirePlumber expects configured defaults to be written to the
+    // default.configured.* keys, and then updates default.audio.* itself.
     let key = match device_type {
-        DeviceType::Sink => "default.audio.sink",
-        DeviceType::Source => "default.audio.source",
+        DeviceType::Sink => "default.configured.audio.sink",
+        DeviceType::Source => "default.configured.audio.source",
     };
 
     let json_value = format!(r#"{{"name":"{}"}}"#, device_name);

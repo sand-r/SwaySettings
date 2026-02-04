@@ -16,6 +16,12 @@ mod imp {
         pub id: Cell<u32>,
 
         #[property(get, set)]
+        pub device_id: Cell<i32>,
+
+        #[property(get, set)]
+        pub profile_device_index: Cell<i32>,
+
+        #[property(get, set)]
         pub name: RefCell<String>,
 
         #[property(get, set)]
@@ -67,6 +73,11 @@ impl AudioDevice {
     pub fn from_info(info: &DeviceInfo) -> Self {
         let device: Self = glib::Object::builder()
             .property("id", info.id)
+            .property("device-id", info.device_id.map(|v| v as i32).unwrap_or(-1))
+            .property(
+                "profile-device-index",
+                info.profile_device_index.map(|v| v as i32).unwrap_or(-1),
+            )
             .property("name", &info.name)
             .property("description", &info.description)
             .property("icon-name", &info.icon_name)
@@ -80,6 +91,19 @@ impl AudioDevice {
 
     /// Update from DeviceInfo
     pub fn update_from_info(&self, info: &DeviceInfo) {
+        if let Some(device_id) = info.device_id {
+            self.set_device_id(device_id as i32);
+        } else {
+            self.set_device_id(-1);
+        }
+        if let Some(profile_idx) = info.profile_device_index {
+            self.set_profile_device_index(profile_idx as i32);
+        } else {
+            self.set_profile_device_index(-1);
+        }
+        self.set_name(info.name.clone());
+        self.set_description(info.description.clone());
+        self.set_property("icon-name", &info.icon_name);
         self.set_volume(info.volume);
         self.set_is_muted(info.is_muted);
         self.set_is_default(info.is_default);

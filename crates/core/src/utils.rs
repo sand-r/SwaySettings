@@ -133,7 +133,12 @@ impl Config {
     }
 
     pub fn to_string(&self) -> String {
-        format!("{} {} {}", self.path, self.scale_mode.to_string(), self.color)
+        format!(
+            "{} {} {}",
+            self.path,
+            self.scale_mode.to_string(),
+            self.color
+        )
     }
 
     pub fn is_path_valid(&self) -> bool {
@@ -196,7 +201,10 @@ pub fn get_scale_mode_gschema(settings: &gio::Settings) -> ScaleMode {
 }
 
 pub fn get_wallpaper_gschema(settings: &gio::Settings) -> Option<String> {
-    let variant =
-        functions::get_gsetting(settings, constants::SETTINGS_WALLPAPER_PATH, VariantTy::STRING);
+    let variant = functions::get_gsetting(
+        settings,
+        constants::SETTINGS_WALLPAPER_PATH,
+        VariantTy::STRING,
+    );
     variant.and_then(|v| v.get::<String>())
 }

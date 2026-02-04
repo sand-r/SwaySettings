@@ -213,9 +213,7 @@ impl BluetoothContent {
             self,
             #[upgrade_or]
             Some(false),
-            move |request| {
-                obj.handle_agent_request(request)
-            }
+            move |request| { obj.handle_agent_request(request) }
         ));
 
         // Start the daemon
@@ -433,11 +431,8 @@ impl BluetoothContent {
 
         let is_discovering = daemon.is_discovering();
         imp.discovery_spinner.set_visible(is_discovering);
-        imp.scan_button.set_label(if is_discovering {
-            "Stop"
-        } else {
-            "Scan"
-        });
+        imp.scan_button
+            .set_label(if is_discovering { "Stop" } else { "Scan" });
     }
 
     fn update_device_lists(&self) {
@@ -562,9 +557,10 @@ impl BluetoothContent {
 
     fn handle_agent_request(&self, request: AgentRequest) -> Option<bool> {
         match request {
-            AgentRequest::RequestConfirmation { device_path, passkey } => {
-                self.show_confirmation_dialog(&device_path, passkey)
-            }
+            AgentRequest::RequestConfirmation {
+                device_path,
+                passkey,
+            } => self.show_confirmation_dialog(&device_path, passkey),
             AgentRequest::DisplayPasskey {
                 device_path,
                 passkey,

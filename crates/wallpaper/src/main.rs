@@ -98,7 +98,8 @@ impl WallpaperWindow {
             self.current.set_paintable(Some(&texture));
         } else if let Ok(texture) = gdk4::Texture::from_file(&gio::File::for_path(&config.path)) {
             self.current.set_paintable(Some(&texture));
-            self.current.set_content_fit(config.scale_mode.to_content_fit());
+            self.current
+                .set_content_fit(config.scale_mode.to_content_fit());
         }
 
         *stored = config;
@@ -149,7 +150,10 @@ fn main() {
 
     let windows_action = windows.clone();
     let config_action = config_state.clone();
-    let action = gio::SimpleAction::new(constants::WALLPAPER_ACTION_NAME, Some(&glib::VariantType::new(constants::WALLPAPER_ACTION_FORMAT).unwrap()));
+    let action = gio::SimpleAction::new(
+        constants::WALLPAPER_ACTION_NAME,
+        Some(&glib::VariantType::new(constants::WALLPAPER_ACTION_FORMAT).unwrap()),
+    );
     action.connect_activate(move |_, param| {
         if let Some(param) = param {
             if let Some((path, mode, color)) = param.get::<(String, i32, String)>() {
@@ -191,7 +195,8 @@ fn main() {
 
     if app.is_remote() {
         let cfg = config_state.borrow();
-        let variant = glib::Variant::from((cfg.path.as_str(), cfg.scale_mode as i32, cfg.color.as_str()));
+        let variant =
+            glib::Variant::from((cfg.path.as_str(), cfg.scale_mode as i32, cfg.color.as_str()));
         app.activate_action(constants::WALLPAPER_ACTION_NAME, Some(&variant));
         return;
     }
@@ -207,14 +212,7 @@ fn texture_from_rgba(color: &gdk4::RGBA) -> gdk4::Texture {
         (color.alpha() * 255.0) as u8,
     ];
     let bytes = glib::Bytes::from(&pixel);
-    let pixbuf = gdk_pixbuf::Pixbuf::from_bytes(
-        &bytes,
-        gdk_pixbuf::Colorspace::Rgb,
-        true,
-        8,
-        1,
-        1,
-        4,
-    );
+    let pixbuf =
+        gdk_pixbuf::Pixbuf::from_bytes(&bytes, gdk_pixbuf::Colorspace::Rgb, true, 8, 1, 1, 4);
     gdk4::Texture::for_pixbuf(&pixbuf)
 }

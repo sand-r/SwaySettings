@@ -1,6 +1,6 @@
 use std::cell::RefCell;
-use std::process::Command;
 use std::io::Write;
+use std::process::Command;
 use std::rc::Rc;
 
 use gio::prelude::*;
@@ -197,7 +197,13 @@ fn draw_overlay(
 }
 
 fn grim_screenshot_rect(rect: &gdk4::Rectangle) -> Option<gdk4::Texture> {
-    let geometry = format!("{},{} {}x{}", rect.x(), rect.y(), rect.width(), rect.height());
+    let geometry = format!(
+        "{},{} {}x{}",
+        rect.x(),
+        rect.y(),
+        rect.width(),
+        rect.height()
+    );
     let output = Command::new("grim")
         .arg("-t")
         .arg("png")
@@ -333,7 +339,11 @@ fn save_to_default(
     }
 }
 
-fn save_as_dialog(settings: &gio::Settings, texture: &gdk4::Texture, preview: &impl IsA<gtk4::Window>) {
+fn save_as_dialog(
+    settings: &gio::Settings,
+    texture: &gdk4::Texture,
+    preview: &impl IsA<gtk4::Window>,
+) {
     let dialog = gtk4::FileDialog::new();
     dialog.set_modal(true);
     dialog.set_title("Save Screenshot");
@@ -344,8 +354,10 @@ fn save_as_dialog(settings: &gio::Settings, texture: &gdk4::Texture, preview: &i
 
     let texture = texture.clone();
     let preview = preview.clone();
-    dialog.save(Some(&preview), None::<&gio::Cancellable>, move |res| {
-        match res {
+    dialog.save(
+        Some(&preview),
+        None::<&gio::Cancellable>,
+        move |res| match res {
             Ok(file) => {
                 if let Some(path) = file.path() {
                     if let Err(err) = texture.save_to_png(path.to_string_lossy().as_ref()) {
@@ -356,8 +368,8 @@ fn save_as_dialog(settings: &gio::Settings, texture: &gdk4::Texture, preview: &i
             Err(err) => {
                 eprintln!("Save dialog error: {err}");
             }
-        }
-    });
+        },
+    );
 }
 
 fn edit_screenshot(settings: &gio::Settings, texture: &gdk4::Texture) {

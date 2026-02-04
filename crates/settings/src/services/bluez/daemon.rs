@@ -205,7 +205,7 @@ impl BluezDaemon {
         let path = obj.object_path().to_string();
 
         // Check for Adapter1 interface
-        if let Some(iface) = dbus_object_interface(&obj,"org.bluez.Adapter1") {
+        if let Some(iface) = dbus_object_interface(&obj, "org.bluez.Adapter1") {
             if let Some(proxy) = iface.downcast_ref::<gio::DBusProxy>() {
                 let adapter = BluezAdapter::from_proxy(proxy.clone());
                 log::debug!("Adapter added: {}", path);
@@ -231,7 +231,7 @@ impl BluezDaemon {
         }
 
         // Check for Device1 interface
-        if let Some(iface) = dbus_object_interface(&obj,"org.bluez.Device1") {
+        if let Some(iface) = dbus_object_interface(&obj, "org.bluez.Device1") {
             if let Some(proxy) = iface.downcast_ref::<gio::DBusProxy>() {
                 let device = BluezDevice::from_proxy(proxy.clone());
                 log::debug!("Device added: {} ({})", device.display_name(), path);

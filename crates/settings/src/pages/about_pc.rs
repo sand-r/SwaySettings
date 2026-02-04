@@ -296,7 +296,9 @@ fn bytes_to_string(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() {
         return None;
     }
-    let value = String::from_utf8_lossy(bytes).trim_end_matches('\0').to_string();
+    let value = String::from_utf8_lossy(bytes)
+        .trim_end_matches('\0')
+        .to_string();
     if value.is_empty() {
         None
     } else {
@@ -384,8 +386,7 @@ fn get_mem_string() -> Option<String> {
                 if let Ok(kb) = parts[1].parse::<u64>() {
                     let bytes = kb.saturating_mul(1024);
                     return Some(
-                        glib::format_size_full(bytes, glib::FormatSizeFlags::IEC_UNITS)
-                            .to_string(),
+                        glib::format_size_full(bytes, glib::FormatSizeFlags::IEC_UNITS).to_string(),
                     );
                 }
             }
