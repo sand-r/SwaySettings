@@ -49,35 +49,25 @@ mod imp {
         #[template_child(id = "stack")]
         pub stack: TemplateChild<gtk4::Stack>,
         #[template_child(id = "main_box")]
-        pub main_box: TemplateChild<gtk4::Box>,
+        pub main_box: TemplateChild<libadwaita::PreferencesPage>,
 
         #[template_child(id = "battery_group")]
         pub battery_group: TemplateChild<libadwaita::PreferencesGroup>,
-        #[template_child(id = "battery_list")]
-        pub battery_list: TemplateChild<gtk4::ListBox>,
-
-        #[template_child(id = "battery_history_row")]
-        pub battery_history_row: TemplateChild<libadwaita::PreferencesGroup>,
-        #[template_child(id = "history_graph")]
-        pub history_graph: TemplateChild<gtk4::Label>,
+        #[template_child(id = "battery_row")]
+        pub battery_row: TemplateChild<libadwaita::ActionRow>,
+        #[template_child(id = "battery_icon")]
+        pub battery_icon: TemplateChild<gtk4::Image>,
+        #[template_child(id = "battery_level")]
+        pub battery_level: TemplateChild<gtk4::LevelBar>,
+        #[template_child(id = "battery_percent")]
+        pub battery_percent: TemplateChild<gtk4::Label>,
+        #[template_child(id = "battery_status_row")]
+        pub battery_status_row: TemplateChild<libadwaita::ActionRow>,
+        #[template_child(id = "battery_status_label")]
+        pub battery_status_label: TemplateChild<gtk4::Label>,
 
         #[template_child(id = "devices_group")]
         pub devices_group: TemplateChild<libadwaita::PreferencesGroup>,
-        #[template_child(id = "devices_list")]
-        pub devices_list: TemplateChild<gtk4::ListBox>,
-
-        #[template_child(id = "battery_health_group")]
-        pub battery_health_group: TemplateChild<libadwaita::PreferencesGroup>,
-        #[template_child(id = "health_status_label")]
-        pub health_status_label: TemplateChild<gtk4::Label>,
-        #[template_child(id = "health_capacity_label")]
-        pub health_capacity_label: TemplateChild<gtk4::Label>,
-        #[template_child(id = "health_cycles_row")]
-        pub health_cycles_row: TemplateChild<libadwaita::ActionRow>,
-        #[template_child(id = "health_cycles_label")]
-        pub health_cycles_label: TemplateChild<gtk4::Label>,
-        #[template_child(id = "threshold_toggle")]
-        pub threshold_toggle: TemplateChild<libadwaita::SwitchRow>,
 
         #[template_child(id = "options_group")]
         pub options_group: TemplateChild<libadwaita::PreferencesGroup>,
@@ -86,14 +76,11 @@ mod imp {
 
         #[template_child(id = "power_mode_group")]
         pub power_mode_group: TemplateChild<libadwaita::PreferencesGroup>,
-        #[template_child(id = "modes_listbox")]
-        pub modes_listbox: TemplateChild<gtk4::ListBox>,
-        #[template_child(id = "power_info_listbox")]
-        pub power_info_listbox: TemplateChild<gtk4::ListBox>,
 
         pub settings: OnceCell<gio::Settings>,
         pub profiles_proxy: RefCell<Option<gio::DBusProxy>>,
-        pub profile_buttons: RefCell<HashMap<String, gtk4::CheckButton>>,
+        pub power_mode_rows: RefCell<Vec<libadwaita::ActionRow>>,
+        pub device_rows: RefCell<Vec<libadwaita::ActionRow>>,
         pub updating_ui: Cell<bool>,
     }
 
@@ -224,17 +211,23 @@ impl PowerContent {
         profiles.sort();
 
         imp.updating_ui.set(true);
-        self.clear_listbox(&imp.modes_listbox);
-        imp.profile_buttons.borrow_mut().clear();
+
+        // Remove old rows
+        for row in imp.power_mode_rows.borrow().iter() {
+            imp.power_mode_group.remove(row);
+        }
+        imp.power_mode_rows.borrow_mut().clear();
 
         let mut group: Option<gtk4::CheckButton> = None;
         for profile in profiles.iter() {
-            let (title, subtitle, _icon_name) = profile_info(profile);
+            let (title, subtitle, icon_name) = profile_info(profile);
             let row = libadwaita::ActionRow::new();
             row.set_title(title);
             row.set_subtitle(subtitle);
-            row.set_selectable(false);
             row.set_activatable(true);
+
+            let icon = gtk4::Image::from_icon_name(icon_name);
+            row.add_prefix(&icon);
 
             let button = gtk4::CheckButton::new();
             if let Some(group_button) = group.as_ref() {
@@ -245,14 +238,7 @@ impl PowerContent {
             button.set_valign(gtk4::Align::Center);
             button.set_active(profile == &active_profile);
             row.set_activatable_widget(Some(&button));
-            row.add_prefix(&button);
-
-            row.add_css_class("power-profile");
-            match profile.as_str() {
-                "power-saver" => row.add_css_class("low-power"),
-                "performance" => row.add_css_class("performance"),
-                _ => {}
-            }
+            row.add_suffix(&button);
 
             let profile_name = profile.clone();
             row.connect_activated(clone!(
@@ -278,23 +264,20 @@ impl PowerContent {
                 }
             ));
 
-            imp.profile_buttons
-                .borrow_mut()
-                .insert(profile.clone(), button);
-            imp.modes_listbox.append(&row);
+            imp.power_mode_rows.borrow_mut().push(row.clone());
+            imp.power_mode_group.add(&row);
         }
-        imp.updating_ui.set(false);
 
-        // Power profile holds & degraded info
+        // Add degraded/holds info rows
         self.refresh_power_info(&proxy);
 
+        imp.updating_ui.set(false);
         imp.power_mode_group.set_visible(!profiles.is_empty());
         self.update_stack_visibility();
     }
 
     fn refresh_power_info(&self, proxy: &gio::DBusProxy) {
         let imp = self.imp();
-        self.clear_listbox(&imp.power_info_listbox);
 
         if let Some(holds) = proxy.cached_property("ActiveProfileHolds") {
             for hold in holds.iter() {
@@ -308,7 +291,8 @@ impl PowerContent {
                         _ => "power-profile-balanced-symbolic",
                     };
                     let row = info_row(icon, &reason);
-                    imp.power_info_listbox.append(&row);
+                    imp.power_mode_rows.borrow_mut().push(row.clone());
+                    imp.power_mode_group.add(&row);
                 }
             }
         }
@@ -318,24 +302,16 @@ impl PowerContent {
             .and_then(|v| v.get::<String>())
         {
             if !degraded.is_empty() {
-                let (icon, text) = match degraded.as_str() {
-                    "lap-detected" => (
-                        "info-outline-symbolic",
-                        "Lap detected: performance mode temporarily unavailable. Move the device to a stable surface to restore.",
-                    ),
-                    "high-operating-temperature" => (
-                        "thermometer-symbolic",
-                        "Performance mode temporarily disabled.",
-                    ),
-                    _ => ("warning-outline-symbolic", "Performance mode temporarily disabled."),
+                let text = match degraded.as_str() {
+                    "lap-detected" => "Performance limited — lap detected",
+                    "high-operating-temperature" => "Performance limited — high temperature",
+                    _ => "Performance limited",
                 };
-                let row = info_row(icon, text);
-                imp.power_info_listbox.append(&row);
+                let row = info_row("dialog-warning-symbolic", text);
+                imp.power_mode_rows.borrow_mut().push(row.clone());
+                imp.power_mode_group.add(&row);
             }
         }
-
-        imp.power_info_listbox
-            .set_visible(imp.power_info_listbox.first_child().is_some());
     }
 
     fn set_active_profile(&self, profile: &str) {
@@ -420,17 +396,22 @@ impl PowerContent {
                 imp.battery_group.set_visible(false);
                 imp.devices_group.set_visible(false);
                 imp.options_group.set_visible(false);
-                imp.battery_health_group.set_visible(false);
-                imp.battery_history_row.set_visible(false);
                 self.update_stack_visibility();
             }
             PowerEvent::Battery(info) => {
-                self.clear_listbox(&imp.battery_list);
                 if let Some(info) = info {
                     if info.is_present {
-                        let details = battery_state_label(info.state);
-                        let row = battery_level_row(&info, details);
-                        imp.battery_list.append(&row);
+                        imp.battery_icon.set_icon_name(Some(&info.icon_name));
+                        imp.battery_level.set_value((info.percent / 100.0).clamp(0.0, 1.0));
+                        imp.battery_percent.set_label(&format!("{:.0}%", info.percent));
+
+                        if let Some(status) = battery_state_label(info.state) {
+                            imp.battery_status_label.set_label(status);
+                            imp.battery_status_row.set_visible(true);
+                        } else {
+                            imp.battery_status_row.set_visible(false);
+                        }
+
                         imp.battery_group.set_visible(true);
                         imp.options_group.set_visible(true);
                     } else {
@@ -444,35 +425,29 @@ impl PowerContent {
                 self.update_stack_visibility();
             }
             PowerEvent::Devices(devices) => {
-                self.clear_listbox(&imp.devices_list);
+                // Remove old rows
+                for row in imp.device_rows.borrow().iter() {
+                    imp.devices_group.remove(row);
+                }
+                imp.device_rows.borrow_mut().clear();
+
+                let has_devices = !devices.is_empty();
                 for device in devices {
                     let row = device_row(&device);
-                    imp.devices_list.append(&row);
+                    imp.device_rows.borrow_mut().push(row.clone());
+                    imp.devices_group.add(&row);
                 }
-                imp.devices_group
-                    .set_visible(imp.devices_list.first_child().is_some());
+                imp.devices_group.set_visible(has_devices);
                 self.update_stack_visibility();
             }
         }
     }
 
-    fn clear_listbox(&self, listbox: &gtk4::ListBox) {
-        while let Some(child) = listbox.first_child() {
-            listbox.remove(&child);
-        }
-    }
-
     fn update_stack_visibility(&self) {
         let imp = self.imp();
-        let mut any_visible = false;
-        let mut child = imp.main_box.first_child();
-        while let Some(widget) = child {
-            if widget.is_visible() {
-                any_visible = true;
-                break;
-            }
-            child = widget.next_sibling();
-        }
+        let any_visible = imp.battery_group.is_visible()
+            || imp.devices_group.is_visible()
+            || imp.power_mode_group.is_visible();
         let page = if any_visible { "page" } else { "placeholder" };
         imp.stack.set_visible_child_name(page);
     }
@@ -569,96 +544,38 @@ fn profile_info(profile: &str) -> (&'static str, &'static str, &'static str) {
 fn info_row(icon_name: &str, text: &str) -> libadwaita::ActionRow {
     let row = libadwaita::ActionRow::new();
     row.set_title(text);
-    row.set_selectable(false);
     row.set_activatable(false);
-    row.add_css_class("power-profile-info-row");
 
     let icon = gtk4::Image::from_icon_name(icon_name);
-    icon.set_pixel_size(24);
     row.add_prefix(&icon);
     row
 }
 
-fn battery_level_row(info: &BatteryInfo, details: Option<&str>) -> gtk4::ListBoxRow {
-    build_level_row(
-        "Battery Level",
-        info.percent,
-        Some(info.icon_name.as_str()),
-        details,
-    )
-}
-
-fn device_row(info: &DeviceInfo) -> gtk4::ListBoxRow {
-    build_level_row(&info.title, info.percent, Some(info.icon_name.as_str()), None)
-}
-
-fn build_level_row(
-    title: &str,
-    percent: f64,
-    icon_name: Option<&str>,
-    details: Option<&str>,
-) -> gtk4::ListBoxRow {
-    let row = gtk4::ListBoxRow::new();
-    row.set_selectable(false);
+fn device_row(info: &DeviceInfo) -> libadwaita::ActionRow {
+    let row = libadwaita::ActionRow::new();
+    row.set_title(&info.title);
     row.set_activatable(false);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
-    outer.set_valign(gtk4::Align::Center);
-    outer.set_margin_start(12);
-    outer.set_margin_end(12);
-    outer.set_margin_top(16);
-    outer.set_margin_bottom(14);
+    let icon = gtk4::Image::from_icon_name(&info.icon_name);
+    row.add_prefix(&icon);
 
-    let top = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    let suffix = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    suffix.set_valign(gtk4::Align::Center);
 
-    let name_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    let name_label = gtk4::Label::new(Some(title));
-    name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    name_label.set_xalign(0.0);
-    name_box.append(&name_label);
+    let level = gtk4::LevelBar::new();
+    level.set_min_value(0.0);
+    level.set_max_value(1.0);
+    level.set_value((info.percent / 100.0).clamp(0.0, 1.0));
+    level.set_valign(gtk4::Align::Center);
+    level.set_width_request(100);
+    suffix.append(&level);
 
-    if let Some(icon_name) = icon_name {
-        let icon = gtk4::Image::from_icon_name(icon_name);
-        icon.set_valign(gtk4::Align::Center);
-        icon.add_css_class("dim-label");
-        name_box.append(&icon);
-    }
+    let percent = gtk4::Label::new(Some(&format!("{:.0}%", info.percent)));
+    percent.add_css_class("dim-label");
+    percent.set_width_chars(4);
+    suffix.append(&percent);
 
-    let percent_label = gtk4::Label::new(Some(&format!("{:.0}%", percent)));
-    percent_label.set_halign(gtk4::Align::End);
-    percent_label.add_css_class("dim-label");
-
-    let levelbar = gtk4::LevelBar::new();
-    levelbar.set_min_value(0.0);
-    levelbar.set_max_value(1.0);
-    levelbar.set_value((percent / 100.0).clamp(0.0, 1.0));
-    levelbar.set_hexpand(true);
-    levelbar.set_halign(gtk4::Align::Fill);
-    levelbar.set_valign(gtk4::Align::Center);
-    levelbar.add_offset_value("warning-battery-offset", 0.03);
-    levelbar.add_offset_value("low-battery-offset", 0.1);
-    levelbar.add_offset_value("high-battery-offset", 1.0);
-
-    top.append(&name_box);
-    top.append(&percent_label);
-    top.append(&levelbar);
-    outer.append(&top);
-
-    if let Some(details) = details {
-        let bottom = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        bottom.set_hexpand(true);
-
-        let details_label = gtk4::Label::new(Some(details));
-        details_label.set_hexpand(true);
-        details_label.set_xalign(0.0);
-        details_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        details_label.add_css_class("dim-label");
-        bottom.append(&details_label);
-
-        outer.append(&bottom);
-    }
-
-    row.set_child(Some(&outer));
+    row.add_suffix(&suffix);
     row
 }
 

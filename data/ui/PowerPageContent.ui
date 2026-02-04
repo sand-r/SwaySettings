@@ -31,156 +31,96 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
           <object class="GtkStackPage">
             <property name="name">page</property>
             <property name="child">
-              <object class="GtkBox" id="main_box">
-                <property name="orientation">1</property>
-                <property name="spacing">24</property>
-                <property name="halign">0</property>
-                <property name="valign">1</property>
-                <child>
-                  <object class="AdwPreferencesGroup" id="battery_group">
-                    <property name="visible">false</property>
-                    <property name="title">Battery</property>
+              <object class="GtkScrolledWindow">
+                <property name="hscrollbar-policy">2</property>
+                <property name="vexpand">true</property>
+                <property name="child">
+                  <object class="AdwPreferencesPage" id="main_box">
                     <child>
-                      <object class="GtkListBox" id="battery_list">
-                        <property name="selection-mode">0</property>
-                        <style>
-                          <class name="boxed-list"/>
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup" id="battery_history_row">
-                    <property name="visible">false</property>
-                    <property name="title">Battery Level History</property>
-                    <child>
-                      <object class="GtkListBox">
-                        <property name="selection-mode">0</property>
-                        <style>
-                          <class name="boxed-list"/>
-                        </style>
+                      <object class="AdwPreferencesGroup" id="battery_group">
+                        <property name="visible">false</property>
+                        <property name="title">Battery</property>
                         <child>
-                          <object class="GtkListBoxRow">
-                            <property name="selectable">false</property>
-                            <property name="activatable">false</property>
-                            <property name="child">
-                              <object class="GtkLabel" id="history_graph">
-                                <property name="label">Battery history not available</property>
-                                <property name="margin-top">12</property>
-                                <property name="margin-bottom">12</property>
-                                <property name="margin-start">12</property>
-                                <property name="margin-end">12</property>
+                          <object class="AdwActionRow" id="battery_row">
+                            <property name="title">Battery Level</property>
+                            <child type="prefix">
+                              <object class="GtkImage" id="battery_icon">
+                                <property name="icon-name">battery-symbolic</property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkBox">
+                                <property name="spacing">12</property>
+                                <property name="valign">3</property>
+                                <child>
+                                  <object class="GtkLevelBar" id="battery_level">
+                                    <property name="valign">3</property>
+                                    <property name="width-request">140</property>
+                                    <property name="min-value">0</property>
+                                    <property name="max-value">1</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel" id="battery_percent">
+                                    <property name="width-chars">4</property>
+                                    <style>
+                                      <class name="dim-label"/>
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="battery_status_row">
+                            <property name="visible">false</property>
+                            <property name="title">Status</property>
+                            <child type="prefix">
+                              <object class="GtkImage">
+                                <property name="icon-name">system-run-symbolic</property>
                                 <style>
                                   <class name="dim-label"/>
                                 </style>
                               </object>
-                            </property>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup" id="devices_group">
-                    <property name="visible">false</property>
-                    <property name="title">Connected Devices</property>
-                    <child>
-                      <object class="GtkListBox" id="devices_list">
-                        <property name="selection-mode">0</property>
-                        <style>
-                          <class name="boxed-list"/>
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup" id="battery_health_group">
-                    <property name="visible">false</property>
-                    <property name="title">Battery Health</property>
-                    <child>
-                      <object class="AdwActionRow">
-                        <property name="title">Health</property>
-                        <child type="suffix">
-                          <object class="GtkLabel" id="health_status_label">
-                            <property name="valign">3</property>
-                            <style>
-                              <class name="dim-label"/>
-                            </style>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkLabel" id="battery_status_label">
+                                <property name="valign">3</property>
+                                <style>
+                                  <class name="dim-label"/>
+                                </style>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>
                     </child>
                     <child>
-                      <object class="AdwActionRow">
-                        <property name="title">Maximum Capacity</property>
-                        <child type="suffix">
-                          <object class="GtkLabel" id="health_capacity_label">
-                            <property name="valign">3</property>
-                            <style>
-                              <class name="dim-label"/>
-                            </style>
+                      <object class="AdwPreferencesGroup" id="devices_group">
+                        <property name="visible">false</property>
+                        <property name="title">Devices</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup" id="power_mode_group">
+                        <property name="visible">false</property>
+                        <property name="title">Power Mode</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup" id="options_group">
+                        <property name="visible">false</property>
+                        <child>
+                          <object class="AdwSwitchRow" id="auto_power_saver_row">
+                            <property name="title">Automatic Power Saver</property>
+                            <property name="subtitle">Enable Power Saver mode when battery is low</property>
                           </object>
                         </child>
                       </object>
                     </child>
-                    <child>
-                      <object class="AdwActionRow" id="health_cycles_row">
-                        <property name="title">Cycle Count</property>
-                        <child type="suffix">
-                          <object class="GtkLabel" id="health_cycles_label">
-                            <property name="valign">3</property>
-                            <style>
-                              <class name="dim-label"/>
-                            </style>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwSwitchRow" id="threshold_toggle">
-                        <property name="title">Charge Limit</property>
-                      </object>
-                    </child>
                   </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup" id="options_group">
-                    <property name="visible">false</property>
-                    <property name="title">Battery Options</property>
-                    <child>
-                      <object class="AdwSwitchRow" id="auto_power_saver_row">
-                        <property name="title">Automatic Power Saver</property>
-                        <property name="subtitle">Enable Power Saver when battery power is low</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup" id="power_mode_group">
-                    <property name="visible">false</property>
-                    <property name="title">Power Mode</property>
-                    <child>
-                      <object class="GtkListBox" id="modes_listbox">
-                        <property name="selection-mode">0</property>
-                        <style>
-                          <class name="boxed-list"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkListBox" id="power_info_listbox">
-                        <property name="selection-mode">0</property>
-                        <property name="margin-top">12</property>
-                        <style>
-                          <class name="boxed-list"/>
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
+                </property>
               </object>
             </property>
           </object>

@@ -23,147 +23,88 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
     StackPage {
       name: "page";
 
-      child: Gtk.Box main_box {
-        orientation: vertical;
-        spacing: 24;
-        halign: fill;
-        valign: start;
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
 
-        Adw.PreferencesGroup battery_group {
-          visible: false;
-          title: "Battery";
+        child: Adw.PreferencesPage main_box {
+          Adw.PreferencesGroup battery_group {
+            visible: false;
+            title: "Battery";
 
-          ListBox battery_list {
-            selection-mode: none;
+            Adw.ActionRow battery_row {
+              title: "Battery Level";
 
-            styles [
-              "boxed-list",
-            ]
-          }
-        }
+              [prefix]
+              Image battery_icon {
+                icon-name: "battery-symbolic";
+              }
 
-        Adw.PreferencesGroup battery_history_row {
-          visible: false;
-          title: "Battery Level History";
+              [suffix]
+              Box {
+                spacing: 12;
+                valign: center;
 
-          ListBox {
-            selection-mode: none;
+                LevelBar battery_level {
+                  valign: center;
+                  width-request: 140;
+                  min-value: 0;
+                  max-value: 1;
+                }
 
-            styles [
-              "boxed-list",
-            ]
+                Label battery_percent {
+                  width-chars: 4;
 
-            ListBoxRow {
-              selectable: false;
-              activatable: false;
+                  styles [
+                    "dim-label"
+                  ]
+                }
+              }
+            }
 
-              child: Label history_graph {
-                label: "Battery history not available";
-                margin-top: 12;
-                margin-bottom: 12;
-                margin-start: 12;
-                margin-end: 12;
+            Adw.ActionRow battery_status_row {
+              visible: false;
+              title: "Status";
+
+              [prefix]
+              Image {
+                icon-name: "system-run-symbolic";
 
                 styles [
                   "dim-label"
                 ]
-              };
-            }
-          }
-        }
+              }
 
-        Adw.PreferencesGroup devices_group {
-          visible: false;
-          title: "Connected Devices";
+              [suffix]
+              Label battery_status_label {
+                valign: center;
 
-          ListBox devices_list {
-            selection-mode: none;
-
-            styles [
-              "boxed-list",
-            ]
-          }
-        }
-
-        Adw.PreferencesGroup battery_health_group {
-          visible: false;
-          title: "Battery Health";
-
-          Adw.ActionRow {
-            title: "Health";
-
-            [suffix]
-            Label health_status_label {
-              valign: center;
-
-              styles [
-                "dim-label"
-              ]
+                styles [
+                  "dim-label"
+                ]
+              }
             }
           }
 
-          Adw.ActionRow {
-            title: "Maximum Capacity";
+          Adw.PreferencesGroup devices_group {
+            visible: false;
+            title: "Devices";
+          }
 
-            [suffix]
-            Label health_capacity_label {
-              valign: center;
+          Adw.PreferencesGroup power_mode_group {
+            visible: false;
+            title: "Power Mode";
+          }
 
-              styles [
-                "dim-label"
-              ]
+          Adw.PreferencesGroup options_group {
+            visible: false;
+
+            Adw.SwitchRow auto_power_saver_row {
+              title: "Automatic Power Saver";
+              subtitle: "Enable Power Saver mode when battery is low";
             }
           }
-
-          Adw.ActionRow health_cycles_row {
-            title: "Cycle Count";
-
-            [suffix]
-            Label health_cycles_label {
-              valign: center;
-
-              styles [
-                "dim-label"
-              ]
-            }
-          }
-
-          Adw.SwitchRow threshold_toggle {
-            title: "Charge Limit";
-          }
-        }
-
-        Adw.PreferencesGroup options_group {
-          visible: false;
-          title: "Battery Options";
-
-          Adw.SwitchRow auto_power_saver_row {
-            title: "Automatic Power Saver";
-            subtitle: "Enable Power Saver when battery power is low";
-          }
-        }
-
-        Adw.PreferencesGroup power_mode_group {
-          visible: false;
-          title: "Power Mode";
-
-          ListBox modes_listbox {
-            selection-mode: none;
-
-            styles [
-              "boxed-list",
-            ]
-          }
-
-          ListBox power_info_listbox {
-            selection-mode: none;
-            margin-top: 12;
-
-            styles [
-              "boxed-list",
-            ]
-          }
-        }
+        };
       };
     }
   };
