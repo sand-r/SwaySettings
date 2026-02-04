@@ -142,7 +142,7 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                         </child>
                         <child>
                           <object class="GtkToggleButton" id="input_mute_toggle">
-                            <property name="icon-name">audio-input-microphone-symbolic</property>
+                            <property name="icon-name">microphone-sensitivity-high-symbolic</property>
                             <property name="valign">3</property>
                             <property name="tooltip-text">Mute</property>
                             <style>

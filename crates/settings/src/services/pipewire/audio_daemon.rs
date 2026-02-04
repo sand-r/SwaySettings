@@ -20,7 +20,7 @@ use pipewire::spa::sys::{
     SPA_TYPE_OBJECT_Props,
     // Route param constants
     SPA_PARAM_ROUTE_direction, SPA_PARAM_ROUTE_name,
-    SPA_PARAM_ROUTE_description, SPA_PARAM_ROUTE_available,
+    SPA_PARAM_ROUTE_description, SPA_PARAM_ROUTE_available, SPA_PARAM_ROUTE_devices,
     // Availability values: unknown=0, no=1, yes=2
     SPA_PARAM_AVAILABILITY_no,
     // Direction values
@@ -153,8 +153,10 @@ struct DeviceState {
     channel_count: u32,
     /// Whether this node is visible in the GUI (based on route availability)
     visible: bool,
-    /// The node.nick used for matching with route names
-    nick: String,
+    /// Route match key for availability matching (profile description or nick)
+    route_key: String,
+    /// Route device index for availability matching (card.profile.device)
+    route_device_index: Option<u32>,
     /// Parent device ID (for matching with route availability)
     parent_device_id: Option<u32>,
 }
@@ -173,6 +175,7 @@ struct RouteInfo {
     description: String,
     direction: u32, // SPA_DIRECTION_INPUT or SPA_DIRECTION_OUTPUT
     available: u32, // SPA_PARAM_AVAILABILITY_*
+    devices: Vec<u32>,
 }
 
 /// State for a PipeWire Device (sound card) - tracks route availability
@@ -560,8 +563,9 @@ fn handle_node_added<F>(
         return;
     }
 
-    // Prefer node.nick (specific port name like "Speaker", "Headphones", "HDMI 1")
-    // over node.description (card name like "Lunar Lake-M HD Audio Controller")
+    // Prefer profile description or node nick for route matching
+    // (these correspond to PipeWire route descriptions like "HDMI / DisplayPort 1 Output")
+    let profile_desc = props.get("device.profile.description");
     let nick = props.get("node.nick");
     let card_desc = props.get("node.description");
 
@@ -586,8 +590,18 @@ fn handle_node_added<F>(
         .get("device.id")
         .and_then(|s| s.parse::<u32>().ok());
 
-    // Store the nick for route matching
-    let node_nick = nick.unwrap_or("").to_string();
+    // Store the route match key for availability matching
+    let route_key = profile_desc
+        .filter(|s| !s.is_empty())
+        .or_else(|| nick.filter(|s| !s.is_empty()))
+        .or_else(|| card_desc.filter(|s| !s.is_empty()))
+        .unwrap_or("")
+        .to_string();
+
+    // Route device index (used for matching route availability by index)
+    let route_device_index = props
+        .get("card.profile.device")
+        .and_then(|s| s.parse::<u32>().ok());
 
     // Check initial route availability
     let mut initially_visible = true;
@@ -599,7 +613,15 @@ fn handle_node_added<F>(
                 DeviceType::Source => SPA_DIRECTION_INPUT,
             };
 
-            if let Some(route_info) = find_matching_route(device_routes, &node_nick, expected_direction) {
+            let route_info = route_device_index
+                .and_then(|idx| {
+                    device_routes.iter().find(|r| {
+                        r.direction == expected_direction && r.devices.iter().any(|d| *d == idx)
+                    })
+                })
+                .or_else(|| find_matching_route(device_routes, &route_key, expected_direction));
+
+            if let Some(route_info) = route_info {
                 if route_info.available == SPA_PARAM_AVAILABILITY_no {
                     initially_visible = false;
                     log::debug!(
@@ -714,7 +736,8 @@ fn handle_node_added<F>(
         _listener: listener,
         channel_count: 2,
         visible: initially_visible,
-        nick: node_nick,
+        route_key,
+        route_device_index,
         parent_device_id,
     };
 
@@ -729,21 +752,16 @@ fn handle_node_added<F>(
 /// Find a matching route for a node nick
 fn find_matching_route<'a>(
     routes: &'a [RouteInfo],
-    node_nick: &str,
+    route_key: &str,
     expected_direction: u32,
 ) -> Option<&'a RouteInfo> {
-    // Normalize for comparison:
-    // - Route "HDMI1" should match nick "HDMI 1" (whitespace)
-    // - Route "Headset" should match nick "Headset Microphone" (prefix)
-    let nick_normalized: String = node_nick.chars().filter(|c| !c.is_whitespace()).collect();
+    if route_key.is_empty() {
+        return None;
+    }
 
-    routes.iter().find(|r| {
-        if r.direction != expected_direction {
-            return false;
-        }
-        let route_normalized: String = r.name.chars().filter(|c| !c.is_whitespace()).collect();
-        nick_normalized == route_normalized || nick_normalized.starts_with(&route_normalized)
-    })
+    routes
+        .iter()
+        .find(|r| r.direction == expected_direction && route_matches_key(r, route_key))
 }
 
 /// Update node visibility based on route availability and emit events
@@ -774,15 +792,13 @@ fn update_node_visibility<F>(
         }
 
         // Check if this node matches the route
-        let nick_normalized: String = state.nick.chars().filter(|c| !c.is_whitespace()).collect();
-        let route_normalized: String = route_info
-            .name
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-
-        let matches =
-            nick_normalized == route_normalized || nick_normalized.starts_with(&route_normalized);
+        let matches = if let Some(idx) = state.route_device_index {
+            route_info.devices.iter().any(|d| *d == idx)
+        } else if !state.route_key.is_empty() {
+            route_matches_key(route_info, &state.route_key)
+        } else {
+            false
+        };
 
         if !matches {
             continue;
@@ -808,6 +824,31 @@ fn update_node_visibility<F>(
             }
         }
     }
+}
+
+/// Normalize and compare a node route key to a route definition
+fn route_matches_key(route_info: &RouteInfo, route_key: &str) -> bool {
+    let normalize = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(|c| c.to_lowercase())
+            .collect::<String>()
+    };
+
+    let key_normalized = normalize(route_key);
+
+    let mut candidates = Vec::new();
+    if !route_info.description.is_empty() {
+        candidates.push(normalize(&route_info.description));
+    }
+    candidates.push(normalize(&route_info.name));
+
+    candidates.iter().any(|route_normalized| {
+        key_normalized == *route_normalized
+            || key_normalized.starts_with(route_normalized)
+            || route_normalized.starts_with(&key_normalized)
+            || key_normalized.ends_with(route_normalized)
+    })
 }
 
 /// Handle PipeWire Device objects (sound cards) to get route availability info
@@ -923,6 +964,7 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
     let mut description = String::new();
     let mut direction: u32 = 0;
     let mut available: u32 = 0;
+    let mut devices: Vec<u32> = Vec::new();
 
     for prop in obj.properties {
         match prop.key {
@@ -946,6 +988,17 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
                     available = id.0;
                 }
             }
+            k if k == SPA_PARAM_ROUTE_devices => {
+                match prop.value {
+                    Value::ValueArray(ValueArray::Int(vals)) => {
+                        devices = vals.iter().map(|v| *v as u32).collect();
+                    }
+                    Value::ValueArray(ValueArray::Id(vals)) => {
+                        devices = vals.iter().map(|v| v.0).collect();
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }
@@ -967,6 +1020,7 @@ fn parse_route_param(pod: &Pod) -> Option<RouteInfo> {
         description,
         direction,
         available,
+        devices,
     })
 }
 

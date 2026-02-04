@@ -349,6 +349,9 @@ impl SoundContent {
                         daemon.set_volume(device.id(), linear_volume);
                     }
                 }
+
+                // Update icon to reflect current input level
+                this.update_input_mute_icon();
             }
         ));
 
@@ -688,11 +691,16 @@ impl SoundContent {
     fn update_input_mute_icon(&self) {
         let imp = self.imp();
         let is_muted = imp.input_mute_toggle.is_active();
+        let volume = imp.input_slider.value();
 
-        let icon = if is_muted {
-            "microphone-disabled-symbolic"
+        let icon = if is_muted || volume <= 0.0 {
+            "microphone-sensitivity-muted-symbolic"
+        } else if volume < 30.0 {
+            "microphone-sensitivity-low-symbolic"
+        } else if volume < 70.0 {
+            "microphone-sensitivity-medium-symbolic"
         } else {
-            "audio-input-microphone-symbolic"
+            "microphone-sensitivity-high-symbolic"
         };
 
         imp.input_mute_toggle.set_icon_name(icon);
