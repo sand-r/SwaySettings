@@ -24,3 +24,5 @@ once_cell.workspace = true
 udisks2 = "0.3.1"
 whoami.workspace = true
 pipewire.workspace = true
+upower_dbus = "0.3.2"
+zbus = "3.7.0"

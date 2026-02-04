@@ -1,5 +1,6 @@
 mod imp {
     use std::cell::{OnceCell, RefCell};
+    use std::collections::HashMap;
 
     use glib::prelude::*;
     use glib::subclass::InitializingObject;
@@ -23,6 +24,7 @@ mod imp {
 
         pub settings: OnceCell<gio::Settings>,
         pub current_page_name: RefCell<Option<String>>,
+        pub page_cache: RefCell<HashMap<crate::pages::PageType, gtk4::Widget>>,
     }
 
     #[glib::object_subclass]
@@ -163,6 +165,7 @@ impl SettingsWindow {
         let content_toolbar = imp.content_toolbar.clone();
         let content_page = imp.content_page.clone();
         let current_page_name = imp.current_page_name.clone();
+        let page_cache = imp.page_cache.clone();
 
         imp.sidebar_listbox.connect_row_activated(move |_, row| {
             let row = row.downcast_ref::<SidebarRow>().unwrap();
@@ -175,7 +178,11 @@ impl SettingsWindow {
             }
             *current_page_name.borrow_mut() = Some(internal_name);
 
-            let widget = pages::create_page(page_type);
+            let widget = page_cache
+                .borrow_mut()
+                .entry(page_type)
+                .or_insert_with(|| pages::create_page(page_type))
+                .clone();
             content_toolbar.set_content(Some(&widget));
             content_page.set_title(page_type.name());
             split_view.set_show_content(true);

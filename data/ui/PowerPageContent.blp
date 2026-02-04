@@ -33,41 +33,17 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
           visible: false;
           title: "Battery";
 
-          Adw.ActionRow battery_status_row {
-            title: "Battery Level";
-            selectable: false;
-            activatable: false;
+          ListBox battery_list {
+            selection-mode: none;
 
-            [prefix]
-            Image battery_group_icon {
-              pixel-size: 32;
-              valign: center;
-            }
-
-            [suffix]
-            Box {
-              orientation: horizontal;
-              spacing: 12;
-              valign: center;
-
-              ProgressBar battery_group_progress {
-                valign: center;
-                hexpand: true;
-                width-request: 140;
-              }
-
-              Label battery_group_percent {
-                valign: center;
-
-                styles [
-                  "dim-label"
-                ]
-              }
-            }
+            styles [
+              "boxed-list",
+            ]
           }
         }
 
         Adw.PreferencesGroup battery_history_row {
+          visible: false;
           title: "Battery Level History";
 
           ListBox {
@@ -81,7 +57,17 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
               selectable: false;
               activatable: false;
 
-              child: $SwaySettingsBatteryGraphWidget history_graph {};
+              child: Label history_graph {
+                label: "Battery history not available";
+                margin-top: 12;
+                margin-bottom: 12;
+                margin-start: 12;
+                margin-end: 12;
+
+                styles [
+                  "dim-label"
+                ]
+              };
             }
           }
         }
@@ -90,7 +76,13 @@ template $SwaySettingsPowerPageContent: Adw.Bin {
           visible: false;
           title: "Connected Devices";
 
-          $SwaySettingsPowerDeviceList devices_list {}
+          ListBox devices_list {
+            selection-mode: none;
+
+            styles [
+              "boxed-list",
+            ]
+          }
         }
 
         Adw.PreferencesGroup battery_health_group {
