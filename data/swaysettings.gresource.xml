@@ -36,5 +36,8 @@
       <file>ui/PowerDevice.ui</file>
       <file>ui/MouseContent.ui</file>
       <file>ui/TrackpadContent.ui</file>
+      <file>ui/KeyboardContent.ui</file>
+      <file>ui/StartupAppsContent.ui</file>
+      <file>ui/DefaultAppsContent.ui</file>
   </gresource>
 </gresources>

@@ -1,0 +1,67 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $SwaySettingsStartupAppsContent: Adw.Bin {
+  child: Stack stack {
+    hhomogeneous: true;
+    vhomogeneous: true;
+    transition-type: crossfade;
+    transition-duration: 200;
+    vexpand: true;
+
+    StackPage {
+      name: "placeholder";
+
+      child: Box {
+        orientation: vertical;
+        spacing: 24;
+        valign: center;
+        halign: center;
+
+        Adw.StatusPage {
+          icon-name: "system-run-symbolic";
+          title: "No Startup Applications";
+          description: "Add applications to launch automatically when you sign in";
+        }
+
+        Button placeholder_add_button {
+          label: "Add Application";
+
+          styles [
+            "pill",
+            "suggested-action"
+          ]
+        }
+      };
+    }
+
+    StackPage {
+      name: "page";
+
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
+
+        child: Adw.PreferencesPage {
+          Adw.PreferencesGroup apps_group {
+            title: "Startup Applications";
+            description: "Applications that start automatically when you log in";
+          }
+
+          Adw.PreferencesGroup {
+            Adw.ActionRow add_row {
+              title: "Add Application";
+              subtitle: "Choose an installed application";
+              activatable: true;
+
+              [prefix]
+              Image {
+                icon-name: "list-add-symbolic";
+              }
+            }
+          }
+        };
+      };
+    }
+  };
+}

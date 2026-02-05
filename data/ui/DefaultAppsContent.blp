@@ -1,0 +1,38 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $SwaySettingsDefaultAppsContent: Adw.Bin {
+  child: Stack stack {
+    hhomogeneous: true;
+    vhomogeneous: true;
+    transition-type: crossfade;
+    transition-duration: 200;
+    vexpand: true;
+
+    StackPage {
+      name: "placeholder";
+
+      child: Adw.StatusPage {
+        icon-name: "application-x-executable-symbolic";
+        title: "No Application Choices Available";
+        description: "No compatible applications were found for default handlers";
+        vexpand: true;
+      };
+    }
+
+    StackPage {
+      name: "page";
+
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
+
+        child: Adw.PreferencesPage {
+          Adw.PreferencesGroup apps_group {
+            title: "Default Applications";
+          }
+        };
+      };
+    }
+  };
+}

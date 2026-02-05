@@ -3,9 +3,14 @@ use gtk4::prelude::*;
 
 mod about_pc;
 mod bluetooth;
+mod default_apps;
+mod keyboard;
+mod mouse;
 mod power;
 mod sound;
+mod startup_apps;
 mod storage_row;
+mod trackpad;
 mod users;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, glib::Enum)]
@@ -108,8 +113,13 @@ pub fn create_page(page: PageType) -> gtk4::Widget {
     match page {
         PageType::AboutPc => about_pc::build_page(),
         PageType::Bluetooth => bluetooth::build_page(),
+        PageType::DefaultApps => default_apps::build_page(),
+        PageType::Keyboard => keyboard::build_page(),
+        PageType::Mouse => mouse::build_page(),
         PageType::Power => power::build_page(),
         PageType::Sound => sound::build_page(),
+        PageType::StartupApps => startup_apps::build_page(),
+        PageType::Trackpad => trackpad::build_page(),
         PageType::Users => users::build_page(),
         _ => create_placeholder(page),
     }

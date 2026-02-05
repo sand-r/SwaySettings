@@ -9,7 +9,11 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
   <template class="SwaySettingsMouseContent" parent="AdwBin">
     <property name="child">
       <object class="GtkStack" id="stack">
+        <property name="hhomogeneous">true</property>
+        <property name="vhomogeneous">true</property>
         <property name="transition-type">1</property>
+        <property name="transition-duration">200</property>
+        <property name="vexpand">true</property>
         <child>
           <object class="GtkStackPage">
             <property name="name">placeholder</property>
@@ -26,75 +30,78 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
           <object class="GtkStackPage">
             <property name="name">page</property>
             <property name="child">
-              <object class="GtkBox" id="content_box">
-                <property name="spacing">24</property>
-                <property name="orientation">1</property>
-                <property name="valign">1</property>
-                <child>
-                  <object class="AdwPreferencesGroup" id="general_group">
-                    <property name="title">General</property>
+              <object class="GtkScrolledWindow">
+                <property name="hscrollbar-policy">2</property>
+                <property name="vexpand">true</property>
+                <property name="child">
+                  <object class="AdwPreferencesPage" id="main_box">
                     <child>
-                      <object class="AdwSwitchRow" id="natural_scroll_row">
-                        <property name="title">Natural Scrolling</property>
-                        <property name="subtitle">Scroll content instead of viewport</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwActionRow" id="scroll_factor_row">
-                        <property name="title">Scroll Speed</property>
-                        <child type="suffix">
-                          <object class="GtkScale" id="scroll_factor_scale">
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">0</property>
-                                <property name="upper">10</property>
-                                <property name="step-increment">0.1</property>
-                                <property name="page-increment">1</property>
-                                <property name="value">1</property>
+                      <object class="AdwPreferencesGroup" id="general_group">
+                        <property name="title">General</property>
+                        <child>
+                          <object class="AdwSwitchRow" id="natural_scroll_row">
+                            <property name="title">Natural Scrolling</property>
+                            <property name="subtitle">Scroll content instead of viewport</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="scroll_factor_row">
+                            <property name="title">Scroll Speed</property>
+                            <child type="suffix">
+                              <object class="GtkScale" id="scroll_factor_scale">
+                                <property name="adjustment">
+                                  <object class="GtkAdjustment">
+                                    <property name="lower">0</property>
+                                    <property name="upper">10</property>
+                                    <property name="step-increment">0.1</property>
+                                    <property name="page-increment">1</property>
+                                    <property name="value">1</property>
+                                  </object>
+                                </property>
+                                <property name="digits">1</property>
+                                <property name="draw-value">true</property>
+                                <property name="hexpand">true</property>
+                                <property name="valign">3</property>
                               </object>
-                            </property>
-                            <property name="digits">1</property>
-                            <property name="draw-value">true</property>
-                            <property name="hexpand">true</property>
-                            <property name="valign">3</property>
+                            </child>
                           </object>
                         </child>
                       </object>
                     </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup" id="speed_group">
-                    <property name="title">Pointer Speed</property>
                     <child>
-                      <object class="AdwComboRow" id="accel_profile_row">
-                        <property name="title">Acceleration Profile</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwActionRow" id="pointer_accel_row">
+                      <object class="AdwPreferencesGroup" id="speed_group">
                         <property name="title">Pointer Speed</property>
-                        <child type="suffix">
-                          <object class="GtkScale" id="pointer_accel_scale">
-                            <property name="adjustment">
-                              <object class="GtkAdjustment">
-                                <property name="lower">-1</property>
-                                <property name="upper">1</property>
-                                <property name="step-increment">0.1</property>
-                                <property name="page-increment">0.1</property>
-                                <property name="value">0</property>
+                        <child>
+                          <object class="AdwComboRow" id="accel_profile_row">
+                            <property name="title">Acceleration Profile</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwActionRow" id="pointer_accel_row">
+                            <property name="title">Pointer Speed</property>
+                            <child type="suffix">
+                              <object class="GtkScale" id="pointer_accel_scale">
+                                <property name="adjustment">
+                                  <object class="GtkAdjustment">
+                                    <property name="lower">-1</property>
+                                    <property name="upper">1</property>
+                                    <property name="step-increment">0.1</property>
+                                    <property name="page-increment">0.1</property>
+                                    <property name="value">0</property>
+                                  </object>
+                                </property>
+                                <property name="digits">1</property>
+                                <property name="draw-value">true</property>
+                                <property name="hexpand">true</property>
+                                <property name="valign">3</property>
                               </object>
-                            </property>
-                            <property name="digits">1</property>
-                            <property name="draw-value">true</property>
-                            <property name="hexpand">true</property>
-                            <property name="valign">3</property>
+                            </child>
                           </object>
                         </child>
                       </object>
                     </child>
                   </object>
-                </child>
+                </property>
               </object>
             </property>
           </object>

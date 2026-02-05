@@ -235,9 +235,7 @@ impl SoundContent {
                     let checkmark_for_root = checkmark.clone();
                     let row_for_root = row.clone();
                     hbox.connect_notify_local(Some("root"), move |widget, _| {
-                        let in_popover = widget
-                            .ancestor(gtk4::Popover::static_type())
-                            .is_some()
+                        let in_popover = widget.ancestor(gtk4::Popover::static_type()).is_some()
                             && widget
                                 .ancestor(libadwaita::ComboRow::static_type())
                                 .and_then(|combo| combo.downcast::<libadwaita::ComboRow>().ok())
@@ -246,9 +244,7 @@ impl SoundContent {
                         checkmark_for_root.set_visible(in_popover);
                     });
 
-                    let in_popover = hbox
-                        .ancestor(gtk4::Popover::static_type())
-                        .is_some()
+                    let in_popover = hbox.ancestor(gtk4::Popover::static_type()).is_some()
                         && hbox
                             .ancestor(libadwaita::ComboRow::static_type())
                             .and_then(|combo| combo.downcast::<libadwaita::ComboRow>().ok())

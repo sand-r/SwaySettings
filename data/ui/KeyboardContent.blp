@@ -1,0 +1,109 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $SwaySettingsKeyboardContent: Adw.Bin {
+  child: Stack stack {
+    hhomogeneous: true;
+    vhomogeneous: true;
+    transition-type: crossfade;
+    transition-duration: 200;
+    vexpand: true;
+
+    StackPage {
+      name: "placeholder";
+
+      child: Adw.StatusPage {
+        icon-name: "input-keyboard-symbolic";
+        title: "No Keyboard Detected";
+        vexpand: true;
+      };
+    }
+
+    StackPage {
+      name: "page";
+
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
+
+        child: Adw.PreferencesPage {
+          Adw.PreferencesGroup {
+            title: "Keyboard Layout";
+            description: "Manage active keyboard layouts and their order";
+
+            Adw.PreferencesRow {
+              activatable: false;
+
+              child: Box {
+                orientation: vertical;
+                spacing: 8;
+                margin-top: 12;
+                margin-bottom: 12;
+                margin-start: 12;
+                margin-end: 12;
+
+                ListBox layouts_list {
+                  selection-mode: single;
+                  activate-on-single-click: true;
+
+                  styles [
+                    "boxed-list"
+                  ]
+                }
+
+                Box {
+                  orientation: horizontal;
+                  spacing: 6;
+
+                  Button add_button {
+                    icon-name: "list-add-symbolic";
+                    tooltip-text: "Add selected layout";
+
+                    styles [
+                      "flat"
+                    ]
+                  }
+
+                  Button remove_button {
+                    icon-name: "list-remove-symbolic";
+                    tooltip-text: "Remove selected layout";
+
+                    styles [
+                      "flat"
+                    ]
+                  }
+
+                  Button up_button {
+                    icon-name: "go-up-symbolic";
+                    tooltip-text: "Move selected layout up";
+
+                    styles [
+                      "flat"
+                    ]
+                  }
+
+                  Button down_button {
+                    icon-name: "go-down-symbolic";
+                    tooltip-text: "Move selected layout down";
+
+                    styles [
+                      "flat"
+                    ]
+                  }
+                }
+              };
+            }
+          }
+
+          Adw.PreferencesGroup {
+            title: "Available Layouts";
+
+            Adw.ComboRow available_layout_row {
+              title: "Layout to Add";
+            }
+          }
+        };
+      };
+    }
+  };
+}

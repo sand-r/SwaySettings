@@ -3,7 +3,11 @@ using Adw 1;
 
 template $SwaySettingsMouseContent: Adw.Bin {
   child: Stack stack {
+    hhomogeneous: true;
+    vhomogeneous: true;
     transition-type: crossfade;
+    transition-duration: 200;
+    vexpand: true;
 
     StackPage {
       name: "placeholder";
@@ -18,65 +22,66 @@ template $SwaySettingsMouseContent: Adw.Bin {
     StackPage {
       name: "page";
 
-      child: Box content_box {
-        spacing: 24;
-        orientation: vertical;
-        valign: start;
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
 
-        Adw.PreferencesGroup general_group {
-          title: 'General';
+        child: Adw.PreferencesPage main_box {
+          Adw.PreferencesGroup general_group {
+            title: 'General';
 
-          Adw.SwitchRow natural_scroll_row {
-            title: 'Natural Scrolling';
-            subtitle: 'Scroll content instead of viewport';
-          }
+            Adw.SwitchRow natural_scroll_row {
+              title: 'Natural Scrolling';
+              subtitle: 'Scroll content instead of viewport';
+            }
 
-          Adw.ActionRow scroll_factor_row {
-            title: 'Scroll Speed';
+            Adw.ActionRow scroll_factor_row {
+              title: 'Scroll Speed';
 
-            [suffix]
-            Scale scroll_factor_scale {
-              adjustment: Adjustment {
-                lower: 0.0;
-                upper: 10.0;
-                step-increment: 0.1;
-                page-increment: 1.0;
-                value: 1.0;
-              };
-              digits: 1;
-              draw-value: true;
-              hexpand: true;
-              valign: center;
+              [suffix]
+              Scale scroll_factor_scale {
+                adjustment: Adjustment {
+                  lower: 0.0;
+                  upper: 10.0;
+                  step-increment: 0.1;
+                  page-increment: 1.0;
+                  value: 1.0;
+                };
+                digits: 1;
+                draw-value: true;
+                hexpand: true;
+                valign: center;
+              }
             }
           }
-        }
 
-        Adw.PreferencesGroup speed_group {
-          title: 'Pointer Speed';
-
-          Adw.ComboRow accel_profile_row {
-            title: 'Acceleration Profile';
-          }
-
-          Adw.ActionRow pointer_accel_row {
+          Adw.PreferencesGroup speed_group {
             title: 'Pointer Speed';
 
-            [suffix]
-            Scale pointer_accel_scale {
-              adjustment: Adjustment {
-                lower: -1.0;
-                upper: 1.0;
-                step-increment: 0.1;
-                page-increment: 0.1;
-                value: 0.0;
-              };
-              digits: 1;
-              draw-value: true;
-              hexpand: true;
-              valign: center;
+            Adw.ComboRow accel_profile_row {
+              title: 'Acceleration Profile';
+            }
+
+            Adw.ActionRow pointer_accel_row {
+              title: 'Pointer Speed';
+
+              [suffix]
+              Scale pointer_accel_scale {
+                adjustment: Adjustment {
+                  lower: -1.0;
+                  upper: 1.0;
+                  step-increment: 0.1;
+                  page-increment: 0.1;
+                  value: 0.0;
+                };
+                digits: 1;
+                draw-value: true;
+                hexpand: true;
+                valign: center;
+              }
             }
           }
-        }
+        };
       };
     }
   };

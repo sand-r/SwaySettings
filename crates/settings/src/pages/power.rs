@@ -2,8 +2,8 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::time::Duration;
 
-use glib::clone;
 use gio::prelude::*;
+use glib::clone;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{CompositeTemplate, TemplateChild};
@@ -402,8 +402,10 @@ impl PowerContent {
                 if let Some(info) = info {
                     if info.is_present {
                         imp.battery_icon.set_icon_name(Some(&info.icon_name));
-                        imp.battery_level.set_value((info.percent / 100.0).clamp(0.0, 1.0));
-                        imp.battery_percent.set_label(&format!("{:.0}%", info.percent));
+                        imp.battery_level
+                            .set_value((info.percent / 100.0).clamp(0.0, 1.0));
+                        imp.battery_percent
+                            .set_label(&format!("{:.0}%", info.percent));
 
                         if let Some(status) = battery_state_label(info.state) {
                             imp.battery_status_label.set_label(status);
@@ -453,13 +455,13 @@ impl PowerContent {
     }
 }
 
-fn fetch_battery_info(
-    conn: &Connection,
-    upower: &UPowerProxyBlocking,
-) -> Option<BatteryInfo> {
+fn fetch_battery_info(conn: &Connection, upower: &UPowerProxyBlocking) -> Option<BatteryInfo> {
     let device = upower.get_display_device().ok()?;
     let percent = device.percentage().ok().unwrap_or(0.0);
-    let icon_name = device.icon_name().ok().unwrap_or_else(|| "battery-symbolic".to_string());
+    let icon_name = device
+        .icon_name()
+        .ok()
+        .unwrap_or_else(|| "battery-symbolic".to_string());
     let state = device.state().ok().unwrap_or(BatteryState::Unknown);
     let is_present = device.is_present().ok().unwrap_or(false);
     let _ = conn;
@@ -496,7 +498,10 @@ fn fetch_devices(conn: &Connection, upower: &UPowerProxyBlocking) -> Vec<DeviceI
             .icon_name()
             .ok()
             .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| device_icon_from_type(proxy.type_().ok().unwrap_or(BatteryType::Unknown)).to_string());
+            .unwrap_or_else(|| {
+                device_icon_from_type(proxy.type_().ok().unwrap_or(BatteryType::Unknown))
+                    .to_string()
+            });
 
         devices_info.push(DeviceInfo {
             title,
@@ -537,7 +542,11 @@ fn profile_info(profile: &str) -> (&'static str, &'static str, &'static str) {
             "Standard performance and power usage",
             "power-profile-balanced-symbolic",
         ),
-        _ => ("Unknown", "Unknown profile", "power-profile-balanced-symbolic"),
+        _ => (
+            "Unknown",
+            "Unknown profile",
+            "power-profile-balanced-symbolic",
+        ),
     }
 }
 

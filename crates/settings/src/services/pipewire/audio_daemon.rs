@@ -29,22 +29,22 @@ use pipewire::spa::sys::{
     SPA_PARAM_PROFILE_save,
     SPA_PARAM_Profile,
     SPA_PARAM_Props,
-    SPA_PARAM_Route,
     SPA_PARAM_ROUTE_available,
     SPA_PARAM_ROUTE_description,
     SPA_PARAM_ROUTE_device,
     SPA_PARAM_ROUTE_devices,
-    SPA_PARAM_ROUTE_index,
     // Route param constants
     SPA_PARAM_ROUTE_direction,
+    SPA_PARAM_ROUTE_index,
     SPA_PARAM_ROUTE_name,
     SPA_PARAM_ROUTE_props,
     SPA_PARAM_ROUTE_save,
+    SPA_PARAM_Route,
     SPA_PROP_channelVolumes,
     SPA_PROP_mute,
     SPA_PROP_volume,
-    SPA_TYPE_OBJECT_ParamRoute,
     SPA_TYPE_OBJECT_ParamProfile,
+    SPA_TYPE_OBJECT_ParamRoute,
     SPA_TYPE_OBJECT_Props,
     // Direction values
     SPA_DIRECTION_INPUT,
@@ -804,8 +804,7 @@ fn handle_node_added<F>(
                 .and_then(|idx| {
                     device_routes.iter().find(|r| {
                         r.direction == expected_direction
-                            && (r.device == idx as i32
-                                || r.devices.iter().any(|d| *d == idx))
+                            && (r.device == idx as i32 || r.devices.iter().any(|d| *d == idx))
                     })
                 })
                 .or_else(|| find_matching_route(device_routes, &route_key, expected_direction));
@@ -1092,8 +1091,8 @@ fn handle_node_added<F>(
             }
 
             let other_name = &other.info.name;
-            let is_wrapper = other_name.starts_with("bluez_output.")
-                || other_name.starts_with("bluez_input.");
+            let is_wrapper =
+                other_name.starts_with("bluez_output.") || other_name.starts_with("bluez_input.");
 
             if !is_wrapper {
                 continue;
@@ -1169,10 +1168,7 @@ fn find_matching_route<'a>(
         .find(|r| r.direction == expected_direction && route_matches_key(r, route_key))
 }
 
-fn find_route_for_state<'a>(
-    state: &DeviceState,
-    routes: &'a [RouteInfo],
-) -> Option<&'a RouteInfo> {
+fn find_route_for_state<'a>(state: &DeviceState, routes: &'a [RouteInfo]) -> Option<&'a RouteInfo> {
     let expected_direction = match state.info.device_type {
         DeviceType::Sink => SPA_DIRECTION_OUTPUT,
         DeviceType::Source => SPA_DIRECTION_INPUT,
@@ -1226,8 +1222,7 @@ fn update_node_visibility<F>(
 
         // Check if this node matches the route
         let matches = if let Some(idx) = state.route_device_index {
-            route_info.device == idx as i32
-                || route_info.devices.iter().any(|d| *d == idx)
+            route_info.device == idx as i32 || route_info.devices.iter().any(|d| *d == idx)
         } else if !state.route_key.is_empty() {
             route_matches_key(route_info, &state.route_key)
         } else {
@@ -1574,13 +1569,11 @@ fn parse_profile_param(pod: &Pod) -> Option<ProfileInfo> {
 
     for prop in obj.properties {
         match prop.key {
-            k if k == SPA_PARAM_PROFILE_index => {
-                match prop.value {
-                    Value::Int(v) => index = Some(v as u32),
-                    Value::Id(id) => index = Some(id.0),
-                    _ => {}
-                }
-            }
+            k if k == SPA_PARAM_PROFILE_index => match prop.value {
+                Value::Int(v) => index = Some(v as u32),
+                Value::Id(id) => index = Some(id.0),
+                _ => {}
+            },
             k if k == SPA_PARAM_PROFILE_name => {
                 if let Value::String(s) = prop.value {
                     name = s;
@@ -1749,7 +1742,11 @@ where
     });
 
     let active_index = state.pending_index.or(state.active_index);
-    callback(AudioEvent::ProfilesUpdated(device_id, profiles, active_index));
+    callback(AudioEvent::ProfilesUpdated(
+        device_id,
+        profiles,
+        active_index,
+    ));
 }
 
 /// Parse volume and mute from Props pod
@@ -1817,9 +1814,7 @@ fn set_node_volume(
         return;
     };
 
-    let driver_state = state
-        .driver_id
-        .and_then(|driver| devs.get(&driver));
+    let driver_state = state.driver_id.and_then(|driver| devs.get(&driver));
 
     let target_state = driver_state.unwrap_or(state);
     let volume_f32 = volume as f32;
@@ -1942,8 +1937,10 @@ fn set_node_volume(
                             };
 
                             let mut buffer = vec![0u8; 512];
-                            let result =
-                                PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(route_obj));
+                            let result = PodSerializer::serialize(
+                                Cursor::new(&mut buffer),
+                                &Value::Object(route_obj),
+                            );
 
                             match result {
                                 Ok((_, len)) => {
@@ -1951,9 +1948,12 @@ fn set_node_volume(
                                     if let Some(pod) = Pod::from_bytes(&buffer) {
                                         device_state.device.set_param(ParamType::Route, 0, pod);
                                         if vol_debug {
-                                            device_state
-                                                .device
-                                                .enum_params(0, Some(ParamType::Route), 0, u32::MAX);
+                                            device_state.device.enum_params(
+                                                0,
+                                                Some(ParamType::Route),
+                                                0,
+                                                u32::MAX,
+                                            );
                                         }
                                         return;
                                     }
@@ -2076,9 +2076,7 @@ fn set_node_mute(
         return;
     };
 
-    let driver_state = state
-        .driver_id
-        .and_then(|driver| devs.get(&driver));
+    let driver_state = state.driver_id.and_then(|driver| devs.get(&driver));
 
     let target_state = driver_state.unwrap_or(state);
 
@@ -2144,8 +2142,10 @@ fn set_node_mute(
                             };
 
                             let mut buffer = vec![0u8; 256];
-                            let result =
-                                PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(route_obj));
+                            let result = PodSerializer::serialize(
+                                Cursor::new(&mut buffer),
+                                &Value::Object(route_obj),
+                            );
 
                             match result {
                                 Ok((_, len)) => {
@@ -2453,10 +2453,7 @@ fn set_default_device(
                         let route_device = if route_info.device >= 0 {
                             route_info.device
                         } else {
-                            state
-                                .route_device_index
-                                .map(|v| v as i32)
-                                .unwrap_or(-1)
+                            state.route_device_index.map(|v| v as i32).unwrap_or(-1)
                         };
 
                         if route_device >= 0 {
@@ -2488,9 +2485,10 @@ fn set_default_device(
                             };
 
                             let mut buffer = vec![0u8; 256];
-                            if let Ok((_, len)) =
-                                PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(route_obj))
-                            {
+                            if let Ok((_, len)) = PodSerializer::serialize(
+                                Cursor::new(&mut buffer),
+                                &Value::Object(route_obj),
+                            ) {
                                 buffer.truncate(len as usize);
                                 if let Some(pod) = Pod::from_bytes(&buffer) {
                                     device_state.device.set_param(ParamType::Route, 0, pod);

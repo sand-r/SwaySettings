@@ -26,3 +26,5 @@ whoami.workspace = true
 pipewire.workspace = true
 upower_dbus = "0.3.2"
 zbus = "3.7.0"
+serde_json.workspace = true
+roxmltree = "0.20"
