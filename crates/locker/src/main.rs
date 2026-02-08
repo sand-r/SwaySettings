@@ -1,35 +1,132 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use clap::Parser;
 use gio::prelude::*;
-use glib::clone;
 use gtk4::prelude::*;
 
+mod fingerprint;
+mod lock_data;
 mod locker_window;
+mod pam;
+
+use fingerprint::FingerprintManager;
 use locker_window::LockerWindow;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Cli {
-    /// Detach from terminal (no-op in this rewrite)
+    /// Detach from terminal
     #[arg(long)]
     daemonize: bool,
 
-    /// Debug: don't use session lock (still a layer-shell overlay)
+    /// Debug: don't use session lock, opens in a regular window
     #[arg(long = "debug-do-not-lock")]
     debug_do_not_lock: bool,
 }
 
-struct LockWindow {
-    window: LockerWindow,
-    entry: gtk4::Entry,
+// Global state accessed by window callbacks
+thread_local! {
+    static SHOULD_LOCK: Cell<bool> = Cell::new(true);
+    static APP: RefCell<Option<libadwaita::Application>> = RefCell::new(None);
+    static WINDOWS: RefCell<Vec<LockerWindow>> = RefCell::new(Vec::new());
+    static FINGERPRINT_INITIALIZED: Cell<bool> = Cell::new(false);
+    static PARENT_PID: Cell<libc::pid_t> = Cell::new(-1);
+    static HOLD_GUARD: RefCell<Option<gio::ApplicationHoldGuard>> = RefCell::new(None);
+}
+
+pub fn should_lock() -> bool {
+    SHOULD_LOCK.with(|c| c.get())
+}
+
+pub fn fingerprint_initialized() -> bool {
+    FINGERPRINT_INITIALIZED.with(|c| c.get())
+}
+
+pub fn set_fingerprint_initialized(val: bool) {
+    FINGERPRINT_INITIALIZED.with(|c| c.set(val));
+}
+
+pub fn do_unlock() {
+    FingerprintManager::get_instance().release_device();
+    APP.with(|cell| {
+        if let Some(ref app) = *cell.borrow() {
+            if should_lock() {
+                // In session-lock mode, just quit (session lock will be unlocked)
+                app.quit();
+            } else {
+                // Debug mode
+                app.quit();
+            }
+        }
+    });
+}
+
+/// Time tracker that fires callbacks at minute boundaries, like the Vala `TimeObj`.
+struct TimeObj {
+    time: RefCell<String>,
+    date: RefCell<String>,
+}
+
+impl TimeObj {
+    fn new() -> Rc<Self> {
+        let obj = Rc::new(Self {
+            time: RefCell::new(String::new()),
+            date: RefCell::new(String::new()),
+        });
+        obj.update();
+        obj
+    }
+
+    fn update(&self) {
+        let now = chrono::Local::now();
+        *self.time.borrow_mut() = now.format("%H:%M").to_string();
+        *self.date.borrow_mut() = now.format("%d %b").to_string();
+    }
+
+    fn time(&self) -> String {
+        self.time.borrow().clone()
+    }
+
+    fn date(&self) -> String {
+        self.date.borrow().clone()
+    }
+
+    fn schedule(self: &Rc<Self>, windows: &Rc<RefCell<Vec<LockerWindow>>>) {
+        let time_obj = self.clone();
+        let windows = windows.clone();
+
+        // Compute ms until the next minute boundary
+        let now = chrono::Local::now();
+        let sec = now.format("%S").to_string().parse::<u32>().unwrap_or(0);
+        let usec = now.timestamp_subsec_micros();
+        let delay_ms = (60 - sec) * 1000 - usec / 1000;
+
+        glib::timeout_add_local_once(
+            std::time::Duration::from_millis(delay_ms as u64),
+            move || {
+                time_obj.update();
+                let t = time_obj.time();
+                let d = time_obj.date();
+                for win in windows.borrow().iter() {
+                    win.set_date_time(&t, &d);
+                }
+                time_obj.schedule(&windows);
+            },
+        );
+    }
 }
 
 fn main() {
     env_logger::init();
 
-    let _cli = Cli::parse();
+    let cli = Cli::parse();
+
+    SHOULD_LOCK.with(|c| c.set(!cli.debug_do_not_lock));
+
+    if cli.daemonize {
+        daemonize();
+    }
 
     gtk4::init().expect("Failed to init GTK");
     let _ = libadwaita::init();
@@ -37,218 +134,251 @@ fn main() {
     swaysettings_core::resources::init_resources();
     swaysettings_core::resources::load_css(
         "/org/erikreider/swaysettings/style/locker.css",
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER,
     );
+
+    // Add icon resource path
+    if let Some(display) = gdk4::Display::default() {
+        let theme = gtk4::IconTheme::for_display(&display);
+        theme.add_resource_path("/org/erikreider/swaysettings/icons");
+    }
+
+    let settings = gio::Settings::new("org.erikreider.swaysettings");
 
     let app = libadwaita::Application::new(
         Some("org.erikreider.swaysettings-locker"),
         gio::ApplicationFlags::FLAGS_NONE,
     );
 
-    app.connect_activate(move |app| {
-        let app = app.clone();
-        let display = match gdk4::Display::default() {
-            Some(display) => display,
-            None => return,
-        };
-        let monitors = display.monitors();
-        let windows: Rc<RefCell<Vec<LockWindow>>> = Rc::new(RefCell::new(Vec::new()));
+    APP.with(|cell| cell.replace(Some(app.clone())));
 
-        for i in 0..monitors.n_items() {
-            if let Some(monitor) = monitors.item(i).and_downcast::<gdk4::Monitor>() {
-                let win = build_lock_window(&app, &monitor);
-                win.window.present();
-                windows.borrow_mut().push(win);
+    let activated = Rc::new(Cell::new(false));
+    let settings_clone = settings.clone();
+
+    app.connect_activate(move |app| {
+        if activated.get() {
+            return;
+        }
+        activated.set(true);
+        HOLD_GUARD.with(|cell| cell.replace(Some(app.hold())));
+        init(app, &settings_clone);
+    });
+
+    // Register and check for remote instance
+    if let Err(e) = app.register(None::<&gio::Cancellable>) {
+        log::error!("Failed to register application: {}", e);
+        std::process::exit(1);
+    }
+
+    if app.is_remote() {
+        // Another instance is already running, signal daemon and exit
+        signal_daemon();
+        return;
+    }
+
+    app.run_with_args::<&str>(&[]);
+}
+
+fn init(app: &libadwaita::Application, settings: &gio::Settings) {
+    let display = match gdk4::Display::default() {
+        Some(display) => display,
+        None => {
+            log::error!("No display found");
+            return;
+        }
+    };
+
+    let monitors = display.monitors();
+    let windows: Rc<RefCell<Vec<LockerWindow>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // Create windows for all monitors
+    for i in 0..monitors.n_items() {
+        if let Some(monitor) = monitors.item(i).and_downcast::<gdk4::Monitor>() {
+            let win = LockerWindow::new(app, &monitor);
+            win.load_content(settings);
+            windows.borrow_mut().push(win);
+        }
+    }
+
+    // Set up time updates
+    let time_obj = TimeObj::new();
+    let t = time_obj.time();
+    let d = time_obj.date();
+    for win in windows.borrow().iter() {
+        win.set_date_time(&t, &d);
+    }
+    time_obj.schedule(&windows);
+
+    // Setup fingerprint UI on first window
+    if let Some(first_win) = windows.borrow().first() {
+        first_win.setup_fingerprint_ui();
+
+        // Connect to app shutdown for cleanup
+        let app_clone = app.clone();
+        app_clone.connect_shutdown(|_| {
+            FingerprintManager::get_instance().release_device();
+        });
+    }
+
+    // Monitor hotplug
+    let app_for_hotplug = app.clone();
+    let settings_for_hotplug = settings.clone();
+    let windows_for_hotplug = windows.clone();
+    monitors.connect_items_changed(move |monitors, position, removed, added| {
+        let mut wins = windows_for_hotplug.borrow_mut();
+
+        // Remove windows for disconnected monitors
+        for _ in 0..removed {
+            if (position as usize) < wins.len() {
+                let win = wins.remove(position as usize);
+                win.close();
             }
         }
 
-        let windows_clone = windows.clone();
-        for lock_win in windows_clone.borrow().iter() {
-            let windows_for_cb = windows_clone.clone();
-            let app_for_cb = app.clone();
-            lock_win.entry.connect_activate(move |entry| {
-                let pwd = entry.text().to_string();
-                if authenticate(&pwd) {
-                    for win in windows_for_cb.borrow().iter() {
-                        win.window.close();
-                    }
-                    app_for_cb.quit();
+        // Add windows for new monitors
+        for i in 0..added {
+            let idx = position + i;
+            if let Some(monitor) = monitors.item(idx).and_downcast::<gdk4::Monitor>() {
+                let win = LockerWindow::new(&app_for_hotplug, &monitor);
+                win.load_content(&settings_for_hotplug);
+                wins.insert(idx as usize, win.clone());
+                if should_lock() {
+                    // In session lock mode, present is handled by session lock
+                    // For now, just present
+                    win.present();
                 } else {
-                    entry.set_text("");
-                    entry.add_css_class("error");
+                    win.present();
                 }
-            });
+            }
         }
     });
 
-    app.run();
+    if should_lock() {
+        // Session lock mode - present all windows
+        locked(&windows);
+        for win in windows.borrow().iter() {
+            win.present();
+        }
+    } else {
+        // Debug mode - regular windows
+        locked(&windows);
+        let app_for_close = app.clone();
+        for win in windows.borrow().iter() {
+            let app_close = app_for_close.clone();
+            win.connect_close_request(move |_| {
+                app_close.quit();
+                glib::Propagation::Proceed
+            });
+            win.present();
+        }
+    }
+
+    // Store windows globally
+    WINDOWS.with(|cell| {
+        *cell.borrow_mut() = windows.borrow().clone();
+    });
 }
 
-fn build_lock_window(app: &libadwaita::Application, monitor: &gdk4::Monitor) -> LockWindow {
-    let window = LockerWindow::new(app);
-    window.set_decorated(false);
-    window.set_resizable(false);
-    window.set_focusable(true);
+fn locked(windows: &Rc<RefCell<Vec<LockerWindow>>>) {
+    // Signal daemon once all windows are mapped
+    let n_items = windows.borrow().len();
+    if n_items == 0 {
+        signal_daemon();
+        return;
+    }
 
-    window.set_default_size(monitor.geometry().width(), monitor.geometry().height());
-    window.fullscreen();
+    let count = Rc::new(Cell::new(n_items as i32));
 
-    let entry = window.entry();
-    entry.grab_focus();
-
-    let time_label = window.time_label();
-    let date_label = window.date_label();
-
-    update_time_labels(&time_label, &date_label);
-    glib::timeout_add_seconds_local(
-        60,
-        clone!(
-            #[strong]
-            time_label,
-            #[strong]
-            date_label,
-            move || {
-                update_time_labels(&time_label, &date_label);
-                glib::ControlFlow::Continue
-            }
-        ),
-    );
-
-    LockWindow { window, entry }
-}
-
-fn update_time_labels(time_label: &gtk4::Label, date_label: &gtk4::Label) {
-    let now = chrono::Local::now();
-    time_label.set_text(&now.format("%H:%M").to_string());
-    date_label.set_text(&now.format("%d %b").to_string());
-}
-
-fn authenticate(password: &str) -> bool {
-    pam_authenticate_credentials("swaysettings-locker", &whoami::username(), password)
-}
-
-fn pam_authenticate_credentials(service: &str, username: &str, password: &str) -> bool {
-    use std::ffi::CString;
-    use std::ptr;
-
-    unsafe {
-        let service_c = match CString::new(service) {
-            Ok(val) => val,
-            Err(_) => return false,
-        };
-        let user_c = match CString::new(username) {
-            Ok(val) => val,
-            Err(_) => return false,
-        };
-
-        let mut handle: *mut PamHandle = ptr::null_mut();
-        let pw = CString::new(password).unwrap_or_default();
-        let data = PamConvData {
-            password: pw.as_ptr(),
-        };
-        let conv = PamConv {
-            conv: Some(pam_conversation),
-            appdata_ptr: &data as *const PamConvData as *mut _,
-        };
-
-        let start = pam_start(service_c.as_ptr(), user_c.as_ptr(), &conv, &mut handle);
-        if start != PAM_SUCCESS {
-            return false;
+    for win in windows.borrow().iter() {
+        if win.is_mapped() && win.is_realized() {
+            let prev = count.get();
+            count.set(prev - 1);
+            continue;
         }
 
-        let auth_status = pam_authenticate_raw(handle, 0);
-        let _ = pam_setcred(handle, PAM_REFRESH_CRED);
-        let _ = pam_end(handle, auth_status);
+        let count_clone = count.clone();
+        win.connect_map(move |_win| {
+            let prev = count_clone.get();
+            count_clone.set(prev - 1);
+            if prev - 1 <= 0 {
+                signal_daemon();
+            }
+        });
+    }
 
-        auth_status == PAM_SUCCESS
+    // If all were already mapped
+    if count.get() <= 0 {
+        signal_daemon();
+        return;
+    }
+
+    // Fallback timeout
+    glib::timeout_add_seconds_local_once(1, || {
+        signal_daemon();
+    });
+}
+
+// --- Daemonization logic ---
+
+fn daemonize() {
+    unsafe {
+        let parent_pid = libc::getpid();
+        PARENT_PID.with(|c| c.set(parent_pid));
+
+        // Set up USR2 signal handler
+        libc::signal(libc::SIGUSR2, sig_handler as *const () as libc::sighandler_t);
+
+        match libc::fork() {
+            -1 => {
+                eprintln!("Fork PID error");
+                std::process::exit(1);
+            }
+            0 => {
+                // Child continues
+            }
+            _child_pid => {
+                // Parent waits for USR2
+                let mut sig_set: libc::sigset_t = std::mem::zeroed();
+                libc::sigemptyset(&mut sig_set);
+                libc::sigaddset(&mut sig_set, libc::SIGUSR2);
+                libc::sigprocmask(libc::SIG_BLOCK, &sig_set, std::ptr::null_mut());
+                let mut sig: i32 = 0;
+                if libc::sigwait(&sig_set, &mut sig) != 0 {
+                    std::process::exit(1);
+                }
+                std::process::exit(0);
+            }
+        }
+
+        if libc::setsid() < 0 {
+            eprintln!("setsid error");
+            std::process::exit(1);
+        }
+
+        match libc::fork() {
+            -1 => {
+                eprintln!("Fork 2 PID error");
+                std::process::exit(1);
+            }
+            0 => {
+                // Grandchild continues as daemon
+            }
+            _ => {
+                std::process::exit(0);
+            }
+        }
     }
 }
 
-#[repr(C)]
-struct PamHandle;
-
-#[repr(C)]
-struct PamMessage {
-    msg_style: i32,
-    msg: *const i8,
+extern "C" fn sig_handler(_sig: i32) {
+    // Signal received (USR2)
 }
 
-#[repr(C)]
-struct PamResponse {
-    resp: *mut i8,
-    resp_retcode: i32,
-}
-
-#[repr(C)]
-struct PamConv {
-    conv: Option<
-        extern "C" fn(
-            i32,
-            *mut *const PamMessage,
-            *mut *mut PamResponse,
-            *mut std::ffi::c_void,
-        ) -> i32,
-    >,
-    appdata_ptr: *mut std::ffi::c_void,
-}
-
-#[repr(C)]
-struct PamConvData {
-    password: *const i8,
-}
-
-const PAM_SUCCESS: i32 = 0;
-const PAM_PROMPT_ECHO_OFF: i32 = 1;
-const PAM_PROMPT_ECHO_ON: i32 = 2;
-const PAM_ERROR_MSG: i32 = 3;
-const PAM_TEXT_INFO: i32 = 4;
-const PAM_REFRESH_CRED: i32 = 0x10;
-
-#[link(name = "pam")]
-extern "C" {
-    fn pam_start(
-        service_name: *const i8,
-        user: *const i8,
-        conv: *const PamConv,
-        pamh: *mut *mut PamHandle,
-    ) -> i32;
-    #[link_name = "pam_authenticate"]
-    fn pam_authenticate_raw(pamh: *mut PamHandle, flags: i32) -> i32;
-    fn pam_setcred(pamh: *mut PamHandle, flags: i32) -> i32;
-    fn pam_end(pamh: *mut PamHandle, pam_status: i32) -> i32;
-}
-
-extern "C" fn pam_conversation(
-    num_msg: i32,
-    msg: *mut *const PamMessage,
-    resp: *mut *mut PamResponse,
-    appdata_ptr: *mut std::ffi::c_void,
-) -> i32 {
-    unsafe {
-        if num_msg <= 0 {
-            return PAM_SUCCESS;
+fn signal_daemon() {
+    let parent_pid = PARENT_PID.with(|c| c.get());
+    if parent_pid > 0 {
+        unsafe {
+            libc::kill(parent_pid, libc::SIGUSR2);
         }
-        let responses =
-            libc::calloc(num_msg as usize, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
-        if responses.is_null() {
-            return PAM_SUCCESS;
-        }
-        *resp = responses;
-
-        let data = &*(appdata_ptr as *const PamConvData);
-        for i in 0..num_msg {
-            let msg_ptr = *msg.add(i as usize);
-            if msg_ptr.is_null() {
-                continue;
-            }
-            let msg = &*msg_ptr;
-            if msg.msg_style == PAM_PROMPT_ECHO_OFF || msg.msg_style == PAM_PROMPT_ECHO_ON {
-                let resp_ptr = libc::strdup(data.password);
-                (*responses.add(i as usize)).resp = resp_ptr;
-            } else if msg.msg_style == PAM_ERROR_MSG || msg.msg_style == PAM_TEXT_INFO {
-                // ignore
-            }
-        }
-        PAM_SUCCESS
     }
 }

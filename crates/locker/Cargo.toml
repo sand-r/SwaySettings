@@ -20,6 +20,8 @@ gio.workspace = true
 gtk4.workspace = true
 libadwaita.workspace = true
 gdk4.workspace = true
+gdk-pixbuf.workspace = true
+gsk4.workspace = true
 
 whoami.workspace = true
 libc.workspace = true

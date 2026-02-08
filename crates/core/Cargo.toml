@@ -18,6 +18,7 @@ gsk4.workspace = true
 graphene.workspace = true
 gtk4.workspace = true
 gdk-pixbuf.workspace = true
+libc.workspace = true
 
 [build-dependencies]
 glib-build-tools = "0.22.0-alpha.2"
