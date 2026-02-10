@@ -1,17 +1,17 @@
-use glib::prelude::*;
-use gtk4::prelude::*;
-
 mod about_pc;
+mod appearance;
 mod bluetooth;
 mod default_apps;
 mod keyboard;
 mod mouse;
 mod power;
+mod screenshot;
 mod sound;
 mod startup_apps;
 mod storage_row;
 mod trackpad;
 mod users;
+mod wallpaper;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, glib::Enum)]
 #[enum_type(name = "SwaySettingsPageType")]
@@ -88,39 +88,20 @@ impl PageType {
     }
 }
 
-pub fn create_placeholder(page: PageType) -> gtk4::Widget {
-    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    box_.set_margin_top(24);
-    box_.set_margin_bottom(24);
-    box_.set_margin_start(24);
-    box_.set_margin_end(24);
-
-    let title = gtk4::Label::new(Some(page.name()));
-    title.add_css_class("title-2");
-    title.set_halign(gtk4::Align::Start);
-
-    let subtitle = gtk4::Label::new(Some("Rust rewrite in progress."));
-    subtitle.add_css_class("dim-label");
-    subtitle.set_halign(gtk4::Align::Start);
-
-    box_.append(&title);
-    box_.append(&subtitle);
-
-    box_.upcast()
-}
-
 pub fn create_page(page: PageType) -> gtk4::Widget {
     match page {
         PageType::AboutPc => about_pc::build_page(),
+        PageType::Appearance => appearance::build_page(),
         PageType::Bluetooth => bluetooth::build_page(),
         PageType::DefaultApps => default_apps::build_page(),
         PageType::Keyboard => keyboard::build_page(),
         PageType::Mouse => mouse::build_page(),
         PageType::Power => power::build_page(),
+        PageType::Screenshot => screenshot::build_page(),
         PageType::Sound => sound::build_page(),
         PageType::StartupApps => startup_apps::build_page(),
         PageType::Trackpad => trackpad::build_page(),
         PageType::Users => users::build_page(),
-        _ => create_placeholder(page),
+        PageType::Wallpaper => wallpaper::build_page(),
     }
 }
