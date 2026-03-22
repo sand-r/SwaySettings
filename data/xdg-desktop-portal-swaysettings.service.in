@@ -1,7 +1,0 @@
-[Unit]
-Description=SwaySettings Portal
-
-[Service]
-Type=dbus
-BusName=org.freedesktop.impl.portal.desktop.swaysettings
-ExecStart=@LIBEXECDIR@/xdg-desktop-portal-swaysettings

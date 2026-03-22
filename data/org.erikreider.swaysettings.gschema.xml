@@ -23,17 +23,17 @@
 			</description>
 		</key>
 		<key name="theme-dark" type="s">
-			<default>"Adwaita-dark"</default>
+			<default>"adw-gtk3-dark"</default>
 			<summary>Selected Dark GTK Theme</summary>
 			<description>
 				This is the theme to use when color-scheme is set to dark mode
 			</description>
 		</key>
 		<key name="theme-light" type="s">
-			<default>"Adwaita"</default>
-			<summary>Selected Dark GTK Theme</summary>
+			<default>"adw-gtk3"</default>
+			<summary>Selected Light GTK Theme</summary>
 			<description>
-				This is the theme to use when color-scheme is set to dark mode
+				This is the theme to use when color-scheme is set to light mode
 			</description>
 		</key>
 

@@ -48,25 +48,10 @@ fn main() {
         gio::ApplicationFlags::FLAGS_NONE,
     );
 
-    let page_value: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-    let page_value_action = page_value.clone();
-
-    let action = gio::SimpleAction::new(
-        "page",
-        Some(&glib::VariantType::new("s").expect("variant type")),
-    );
-    action.connect_activate(move |_, param| {
-        if let Some(param) = param {
-            if let Some(value) = param.get::<String>() {
-                *page_value_action.borrow_mut() = Some(value);
-            }
-        }
-    });
-
-    app.add_action(&action);
+    let initial_page: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(cli.page));
 
     let settings_clone = settings.clone();
-    let page_value_clone = page_value.clone();
+    let initial_page_clone = initial_page.clone();
 
     app.connect_activate(move |app| {
         let window = SettingsWindow::new(app, &settings_clone);
@@ -83,14 +68,11 @@ fn main() {
 
         window.present();
 
-        if let Some(page) = page_value_clone.borrow().clone() {
+        if let Some(page) = initial_page_clone.borrow_mut().take() {
             window.navigate_to_page(&page);
         }
     });
 
-    if let Some(page) = cli.page {
-        app.activate_action("page", Some(&glib::Variant::from(page.as_str())));
-    }
-
-    app.run();
+    // Pass empty args so GApplication doesn't try to parse our CLI flags
+    app.run_with_args::<String>(&[]);
 }

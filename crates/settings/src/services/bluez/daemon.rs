@@ -428,6 +428,7 @@ impl BluezDaemon {
         }
     }
 
+    #[allow(dead_code)]
     fn notify_adapter_changed(&self, adapter: &BluezAdapter) {
         if let Some(ref cb) = *self.on_adapter_changed.borrow() {
             cb(adapter);

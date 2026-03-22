@@ -14,6 +14,7 @@ use super::audio_device::AudioDevice;
 use super::profile_item::ProfileItem;
 use crate::services::pipewire::{
     cubic_to_linear, linear_to_cubic, AudioDaemon, AudioEvent, DeviceType, ProfileInfo,
+    StreamInfo,
 };
 
 #[derive(Clone, Default)]
@@ -28,6 +29,9 @@ mod imp {
     #[derive(CompositeTemplate)]
     #[template(resource = "/org/erikreider/swaysettings/ui/SoundContent.ui")]
     pub struct SoundContent {
+        #[template_child]
+        pub stack: TemplateChild<gtk4::Stack>,
+
         // Output widgets
         #[template_child]
         pub output_group: TemplateChild<libadwaita::PreferencesGroup>,
@@ -60,6 +64,12 @@ mod imp {
         #[template_child]
         pub input_level_bar: TemplateChild<gtk4::LevelBar>,
 
+        // Applications
+        #[template_child]
+        pub apps_group: TemplateChild<libadwaita::PreferencesGroup>,
+        /// Map stream id -> row widget
+        pub stream_rows: RefCell<HashMap<u32, gtk4::Box>>,
+
         pub sinks: RefCell<gio::ListStore>,
         pub sources: RefCell<gio::ListStore>,
         pub output_profiles: RefCell<gio::ListStore>,
@@ -72,6 +82,7 @@ mod imp {
     impl Default for SoundContent {
         fn default() -> Self {
             Self {
+                stack: TemplateChild::default(),
                 output_group: TemplateChild::default(),
                 output_no_devices_group: TemplateChild::default(),
                 output_device_row: TemplateChild::default(),
@@ -86,6 +97,8 @@ mod imp {
                 input_slider: TemplateChild::default(),
                 input_mute_toggle: TemplateChild::default(),
                 input_level_bar: TemplateChild::default(),
+                apps_group: TemplateChild::default(),
+                stream_rows: RefCell::new(HashMap::new()),
                 sinks: RefCell::new(gio::ListStore::new::<AudioDevice>()),
                 sources: RefCell::new(gio::ListStore::new::<AudioDevice>()),
                 output_profiles: RefCell::new(gio::ListStore::new::<ProfileItem>()),
@@ -586,6 +599,7 @@ impl SoundContent {
         match event {
             AudioEvent::Ready => {
                 log::info!("PipeWire daemon ready");
+                self.imp().stack.set_visible_child_name("page");
             }
             AudioEvent::DeviceAdded(info) => {
                 self.add_device(&info);
@@ -604,6 +618,15 @@ impl SoundContent {
             }
             AudioEvent::PeakLevel(device_type, level) => {
                 self.update_peak_level(device_type, level);
+            }
+            AudioEvent::StreamAdded(info) => {
+                self.add_stream(&info);
+            }
+            AudioEvent::StreamRemoved(id) => {
+                self.remove_stream(id);
+            }
+            AudioEvent::StreamChanged(info) => {
+                self.update_stream(&info);
             }
             AudioEvent::Error(msg) => {
                 log::error!("PipeWire error: {}", msg);
@@ -954,6 +977,176 @@ impl SoundContent {
         row.set_visible(true);
     }
 
+    fn add_stream(&self, info: &StreamInfo) {
+        let imp = self.imp();
+
+        let row = self.build_stream_row(info);
+
+        // Wrap in a PreferencesRow for the group
+        let pref_row = libadwaita::PreferencesRow::builder()
+            .activatable(false)
+            .selectable(false)
+            .build();
+        pref_row.set_child(Some(&row));
+
+        imp.apps_group.add(&pref_row);
+        imp.stream_rows.borrow_mut().insert(info.id, row);
+        imp.apps_group.set_visible(true);
+    }
+
+    fn remove_stream(&self, id: u32) {
+        let imp = self.imp();
+        let mut rows = imp.stream_rows.borrow_mut();
+        if let Some(row) = rows.remove(&id) {
+            // The row is inside a PreferencesRow; remove the parent
+            if let Some(parent) = row.parent() {
+                imp.apps_group.remove(&parent);
+            }
+        }
+        if rows.is_empty() {
+            imp.apps_group.set_visible(false);
+        }
+    }
+
+    fn update_stream(&self, info: &StreamInfo) {
+        let imp = self.imp();
+        let rows = imp.stream_rows.borrow();
+        let Some(row) = rows.get(&info.id) else {
+            return;
+        };
+
+        imp.updating_ui.set(true);
+
+        // Find the slider and mute toggle inside the row
+        if let Some(slider) = find_child_by_name::<gtk4::Scale>(row, "stream-slider") {
+            let ui_volume = linear_to_cubic(info.volume) * 100.0;
+            if (slider.value() - ui_volume).abs() > 0.5 {
+                slider.set_value(ui_volume);
+            }
+        }
+
+        if let Some(toggle) = find_child_by_name::<gtk4::ToggleButton>(row, "stream-mute") {
+            if toggle.is_active() != info.is_muted {
+                toggle.set_active(info.is_muted);
+            }
+            let icon = if info.is_muted {
+                "audio-volume-muted-symbolic"
+            } else {
+                let vol = linear_to_cubic(info.volume) * 100.0;
+                if vol < 33.0 {
+                    "audio-volume-low-symbolic"
+                } else if vol < 66.0 {
+                    "audio-volume-medium-symbolic"
+                } else {
+                    "audio-volume-high-symbolic"
+                }
+            };
+            toggle.set_icon_name(icon);
+        }
+
+        imp.updating_ui.set(false);
+    }
+
+    fn build_stream_row(&self, info: &StreamInfo) -> gtk4::Box {
+        let hbox = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(12)
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+
+        // App icon
+        let icon_name = info
+            .icon_name
+            .as_deref()
+            .unwrap_or("application-x-executable-symbolic");
+        let icon = gtk4::Image::from_icon_name(icon_name);
+        icon.set_pixel_size(24);
+        hbox.append(&icon);
+
+        // App name
+        let label = gtk4::Label::new(Some(&info.app_name));
+        label.set_xalign(0.0);
+        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        label.set_width_chars(1);
+        label.set_hexpand(true);
+        hbox.append(&label);
+
+        // Mute toggle
+        let mute_toggle = gtk4::ToggleButton::builder()
+            .icon_name("audio-volume-high-symbolic")
+            .valign(gtk4::Align::Center)
+            .tooltip_text("Mute")
+            .build();
+        mute_toggle.add_css_class("flat");
+        mute_toggle.set_widget_name("stream-mute");
+        hbox.append(&mute_toggle);
+
+        // Volume slider
+        let adjustment = gtk4::Adjustment::new(0.0, 0.0, 100.0, 1.0, 10.0, 0.0);
+        let slider = gtk4::Scale::builder()
+            .adjustment(&adjustment)
+            .hexpand(true)
+            .draw_value(false)
+            .build();
+        slider.set_widget_name("stream-slider");
+
+        // Set initial volume
+        let ui_volume = linear_to_cubic(info.volume) * 100.0;
+        slider.set_value(ui_volume);
+
+        if info.is_muted {
+            mute_toggle.set_active(true);
+            mute_toggle.set_icon_name("audio-volume-muted-symbolic");
+        }
+
+        hbox.append(&slider);
+
+        // Connect signals
+        let stream_id = info.id;
+
+        slider.connect_value_changed(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |slider| {
+                let imp = this.imp();
+                if imp.updating_ui.get() {
+                    return;
+                }
+                if let Some(daemon) = imp.daemon.borrow().as_ref() {
+                    let ui_volume = slider.value() / 100.0;
+                    let linear_volume = cubic_to_linear(ui_volume);
+                    daemon.set_stream_volume(stream_id, linear_volume);
+                }
+            }
+        ));
+
+        mute_toggle.connect_toggled(clone!(
+            #[weak(rename_to = this)]
+            self,
+            move |toggle| {
+                let imp = this.imp();
+                if imp.updating_ui.get() {
+                    return;
+                }
+                if let Some(daemon) = imp.daemon.borrow().as_ref() {
+                    daemon.set_stream_mute(stream_id, toggle.is_active());
+                }
+
+                let icon = if toggle.is_active() {
+                    "audio-volume-muted-symbolic"
+                } else {
+                    "audio-volume-high-symbolic"
+                };
+                toggle.set_icon_name(icon);
+            }
+        ));
+
+        hbox
+    }
+
     fn update_output_controls(&self, device: &AudioDevice) {
         let imp = self.imp();
 
@@ -1150,4 +1343,16 @@ fn get_device_icon(device: &AudioDevice) -> String {
     } else {
         "audio-input-microphone-symbolic".to_string()
     }
+}
+
+/// Find a child widget by its widget name, searching recursively
+fn find_child_by_name<T: glib::prelude::IsA<gtk4::Widget>>(parent: &gtk4::Box, name: &str) -> Option<T> {
+    let mut child = parent.first_child();
+    while let Some(widget) = child {
+        if widget.widget_name() == name {
+            return widget.downcast::<T>().ok();
+        }
+        child = widget.next_sibling();
+    }
+    None
 }

@@ -1,1 +1,2 @@
 option('systemduserunitdir', type: 'string', value: '', description: 'Custom directory to install systemd user units.')
+option('cargo_exclude', type: 'array', value: [], description: 'Cargo workspace crates to exclude from the build (e.g. swaysettings-locker when pam is unavailable).')

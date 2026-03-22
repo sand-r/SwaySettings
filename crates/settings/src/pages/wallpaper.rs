@@ -36,8 +36,8 @@ pub fn build_page() -> gtk4::Widget {
     content_box.set_margin_end(24);
 
     // Preview image
-    let (preview_widget, preview) = build_preview_image(&settings);
-    content_box.append(&preview_widget);
+    let preview = build_preview_image(&settings);
+    content_box.append(&preview);
 
     // Scale mode combo in a PreferencesGroup
     let scale_group = build_scale_mode_row(&settings, &preview);
@@ -135,28 +135,21 @@ pub fn build_page() -> gtk4::Widget {
     scrolled.upcast()
 }
 
-fn build_preview_image(settings: &gio::Settings) -> (gtk4::Widget, gtk4::Picture) {
+fn build_preview_image(settings: &gio::Settings) -> gtk4::Picture {
     let picture = gtk4::Picture::new();
-    picture.set_content_fit(gtk4::ContentFit::Cover);
-    picture.set_can_shrink(true);
+    picture.set_can_shrink(false);
+    picture.set_halign(gtk4::Align::Center);
+    // Set minimum size so layout is correct before texture loads
+    picture.set_size_request(PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT);
     picture.add_css_class("thumbnail-image");
 
-    // Wrap in a fixed-size box so the picture doesn't expand beyond intended dimensions
-    let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    frame.set_halign(gtk4::Align::Center);
-    frame.set_valign(gtk4::Align::Start);
-    frame.set_size_request(PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT);
-    frame.set_overflow(gtk4::Overflow::Hidden);
-    frame.append(&picture);
-
     refresh_preview(&picture, settings);
-
-    (frame.upcast(), picture)
+    picture
 }
 
-fn refresh_preview(picture: &gtk4::Picture, settings: &gio::Settings) {
+fn refresh_preview(picture: &gtk4::Picture, _settings: &gio::Settings) {
     let wallpaper_path = utils::Config::default_path().to_path_buf();
-    load_image_async(picture, &wallpaper_path.to_string_lossy(), true);
+    load_image_async(picture, &wallpaper_path.to_string_lossy(), PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT);
 }
 
 fn build_scale_mode_row(
@@ -258,7 +251,7 @@ fn build_wallpaper_section(
     let flow_box = gtk4::FlowBox::builder()
         .max_children_per_line(8)
         .min_children_per_line(1)
-        .homogeneous(true)
+        .homogeneous(false)
         .halign(gtk4::Align::Center)
         .activate_on_single_click(true)
         .selection_mode(gtk4::SelectionMode::Single)
@@ -285,12 +278,10 @@ fn build_wallpaper_section(
 
     for wp in wallpapers {
         let overlay = gtk4::Overlay::new();
-        overlay.set_size_request(THUMB_WIDTH, THUMB_HEIGHT);
-        overlay.set_overflow(gtk4::Overflow::Hidden);
 
         let picture = gtk4::Picture::new();
-        picture.set_content_fit(gtk4::ContentFit::Cover);
-        picture.set_can_shrink(true);
+        picture.set_can_shrink(false);
+        picture.set_size_request(THUMB_WIDTH, THUMB_HEIGHT);
         picture.set_tooltip_text(Some(&wp.path));
         picture.add_css_class("thumbnail-image");
 
@@ -348,7 +339,7 @@ fn load_batched_images(queue: Rc<RefCell<VecDeque<gtk4::Picture>>>) {
 
         for picture in batch {
             if let Some(path) = picture.tooltip_text() {
-                load_image_async(&picture, &path, false);
+                load_image_async(&picture, &path, THUMB_WIDTH, THUMB_HEIGHT);
             }
         }
 
@@ -356,13 +347,13 @@ fn load_batched_images(queue: Rc<RefCell<VecDeque<gtk4::Picture>>>) {
     });
 }
 
-fn load_image_async(picture: &gtk4::Picture, path: &str, full_size: bool) {
+fn load_image_async(picture: &gtk4::Picture, path: &str, target_w: i32, target_h: i32) {
     let path = path.to_string();
     let weak = glib::SendWeakRef::from(picture.downgrade());
     let context = glib::MainContext::default();
 
     std::thread::spawn(move || {
-        let texture = load_texture(&path, full_size);
+        let texture = load_cover_texture(&path, target_w, target_h);
         context.invoke(move || {
             if let Some(picture) = weak.upgrade() {
                 match texture {
@@ -374,16 +365,52 @@ fn load_image_async(picture: &gtk4::Picture, path: &str, full_size: bool) {
     });
 }
 
-fn load_texture(path: &str, full_size: bool) -> Option<gdk4::Texture> {
-    if !full_size {
-        if let Ok(thumb_path) = functions::generate_thumbnail(path, false, 256) {
-            if let Ok(tex) = gdk4::Texture::from_filename(&thumb_path) {
-                return Some(tex);
-            }
-        }
+/// Load an image, scale it to cover the target area, and center-crop to exact dimensions.
+/// The returned texture has intrinsic size exactly target_w × target_h.
+fn load_cover_texture(path: &str, target_w: i32, target_h: i32) -> Option<gdk4::Texture> {
+    // For small targets, use cached thumbnail as source for speed
+    let pixbuf = if target_w <= 256 && target_h <= 256 {
+        let thumb_path = functions::generate_thumbnail(path, false, 256)
+            .unwrap_or_else(|_| PathBuf::from(path));
+        gdk_pixbuf::Pixbuf::from_file(&thumb_path).ok()?
+    } else {
+        // Load at ~2x target size for quality without loading a full 4K image
+        let max_dim = target_w.max(target_h) * 2;
+        gdk_pixbuf::Pixbuf::from_file_at_scale(path, max_dim, max_dim, true).ok()?
+    };
+
+    let src_w = pixbuf.width() as f64;
+    let src_h = pixbuf.height() as f64;
+    if src_w <= 0.0 || src_h <= 0.0 {
+        return None;
     }
 
-    gdk4::Texture::from_filename(path).ok()
+    // Cover: scale so the image fills the target area completely
+    let scale = (target_w as f64 / src_w).max(target_h as f64 / src_h);
+    let scaled_w = (src_w * scale).ceil() as i32;
+    let scaled_h = (src_h * scale).ceil() as i32;
+
+    let scaled = pixbuf.scale_simple(scaled_w, scaled_h, gdk_pixbuf::InterpType::Bilinear)?;
+
+    // Center-crop to exact target dimensions
+    let crop_x = (scaled.width() - target_w).max(0) / 2;
+    let crop_y = (scaled.height() - target_h).max(0) / 2;
+    let final_w = target_w.min(scaled.width());
+    let final_h = target_h.min(scaled.height());
+    let cropped = scaled.new_subpixbuf(crop_x, crop_y, final_w, final_h);
+
+    // Copy to contiguous memory (subpixbuf shares parent stride)
+    let copied = cropped.copy()?;
+    let bytes = copied.read_pixel_bytes();
+    let format = if copied.has_alpha() {
+        gdk4::MemoryFormat::R8g8b8a8
+    } else {
+        gdk4::MemoryFormat::R8g8b8
+    };
+    Some(
+        gdk4::MemoryTexture::new(final_w, final_h, format, &bytes, copied.rowstride() as usize)
+            .upcast(),
+    )
 }
 
 fn add_user_wallpaper(button: &gtk4::Button, settings: &gio::Settings) {

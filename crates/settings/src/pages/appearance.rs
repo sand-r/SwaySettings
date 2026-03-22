@@ -10,7 +10,8 @@ use libadwaita::prelude::*;
 use swaysettings_core::constants::{SETTINGS_THEME_DARK, SETTINGS_THEME_LIGHT};
 use swaysettings_core::functions;
 
-const DEFAULT_THEME: &str = "Adwaita";
+const DEFAULT_THEME_LIGHT: &str = "adw-gtk3";
+const DEFAULT_THEME_DARK: &str = "adw-gtk3-dark";
 
 const TINY_WINDOW_HEIGHT: i32 = 64;
 const TINY_WINDOW_WIDTH: i32 = 90;
@@ -165,9 +166,6 @@ pub fn build_page() -> gtk4::Widget {
     )));
     pref_page.add(&*gtk_group.borrow());
 
-    // Sync theme on startup
-    sync_gtk_theme(&gnome_settings, &self_settings);
-
     // Listen for external changes
     {
         let gnome_settings_c = gnome_settings.clone();
@@ -255,25 +253,24 @@ fn set_self_theme(
     functions::set_gsetting(self_settings, key, &Variant::from(theme));
 }
 
+fn default_theme_for_style(style: ThemeStyle) -> &'static str {
+    match style {
+        ThemeStyle::Light => DEFAULT_THEME_LIGHT,
+        ThemeStyle::Dark => DEFAULT_THEME_DARK,
+    }
+}
+
 fn sync_gtk_theme(gnome_settings: &gio::Settings, self_settings: &gio::Settings) {
+    let style = get_color_scheme(gnome_settings);
     let theme = get_theme_for_style(gnome_settings, self_settings);
-    let applied = functions::get_gsetting(gnome_settings, "gtk-theme", VariantTy::STRING)
-        .and_then(|v| v.get::<String>());
 
     let theme = match theme {
-        Some(ref t) if !t.is_empty() => {
-            if applied.as_deref() == Some(t) {
-                return;
-            }
-            t.clone()
-        }
-        _ => {
-            let default = DEFAULT_THEME.to_string();
-            set_self_theme(gnome_settings, self_settings, &default);
-            default
-        }
+        Some(ref t) if !t.is_empty() => t.clone(),
+        _ => default_theme_for_style(style).to_string(),
     };
 
+    // Always apply — even if gtk-theme already matches, we still need to
+    // write config files when switching between light/dark styles.
     set_gtk_value(gnome_settings, "gtk-theme", &Variant::from(theme.as_str()), true);
 }
 

@@ -140,6 +140,18 @@ impl ProfileInfo {
     }
 }
 
+/// Information about an application audio stream
+#[derive(Debug, Clone)]
+pub struct StreamInfo {
+    pub id: u32,
+    pub name: String,
+    pub app_name: String,
+    pub icon_name: Option<String>,
+    pub volume: f64,
+    pub is_muted: bool,
+    pub is_output: bool,
+}
+
 /// Events sent from the PipeWire thread to the main GTK thread
 #[derive(Debug)]
 pub enum AudioEvent {
@@ -151,6 +163,9 @@ pub enum AudioEvent {
     ProfilesUpdated(u32, Vec<ProfileInfo>, Option<u32>),
     /// Peak level update (device_type, level 0.0-1.0)
     PeakLevel(DeviceType, f32),
+    StreamAdded(StreamInfo),
+    StreamRemoved(u32),
+    StreamChanged(StreamInfo),
     Error(String),
 }
 
@@ -162,6 +177,8 @@ enum AudioCommand {
     SetDefaultSink(u32),
     SetDefaultSource(u32),
     SetProfile(u32, u32),
+    SetStreamVolume(u32, f64),
+    SetStreamMute(u32, bool),
     Shutdown,
 }
 
@@ -227,6 +244,20 @@ impl AudioDaemon {
             .command_tx
             .send(AudioCommand::SetProfile(device_id, profile_index));
     }
+
+    /// Set volume for an application stream (0.0 to 1.5 for 150%)
+    pub fn set_stream_volume(&self, id: u32, volume: f64) {
+        let _ = self
+            .command_tx
+            .send(AudioCommand::SetStreamVolume(id, volume));
+    }
+
+    /// Set mute state for an application stream
+    pub fn set_stream_mute(&self, id: u32, muted: bool) {
+        let _ = self
+            .command_tx
+            .send(AudioCommand::SetStreamMute(id, muted));
+    }
 }
 
 impl Drop for AudioDaemon {
@@ -255,6 +286,14 @@ struct DeviceState {
     route_device_index: Option<u32>,
     /// Parent device ID (for matching with route availability)
     parent_device_id: Option<u32>,
+}
+
+/// Internal state for tracking application streams
+struct StreamState {
+    info: StreamInfo,
+    node: pipewire::node::Node,
+    _listener: pipewire::node::NodeListener,
+    channel_count: u32,
 }
 
 /// State for metadata (default device tracking)
@@ -501,6 +540,8 @@ where
         Rc::new(RefCell::new(HashMap::new()));
     // Profile info per device (card)
     let profiles: Rc<RefCell<HashMap<u32, ProfileState>>> = Rc::new(RefCell::new(HashMap::new()));
+    // Application streams
+    let streams: Rc<RefCell<HashMap<u32, StreamState>>> = Rc::new(RefCell::new(HashMap::new()));
 
     // Clone for closures - each closure that captures with `move` needs its own clone
     let nodes_for_global = nodes.clone();
@@ -518,6 +559,9 @@ where
     let nodes_for_route_check = nodes.clone();
     let profiles_for_global = profiles.clone();
     let profiles_for_commands = profiles.clone();
+    let streams_for_global = streams.clone();
+    let streams_for_remove = streams.clone();
+    let streams_for_commands = streams.clone();
     let registry_for_global = registry.clone();
 
     // Wrap callback in Rc for sharing
@@ -527,6 +571,7 @@ where
     let event_callback_for_params = event_callback.clone();
     let event_callback_for_route_check = event_callback.clone();
     let event_callback_for_commands = event_callback.clone();
+    let event_callback_for_streams = event_callback.clone();
 
     // Create peak monitoring streams for output and input
     let _sink_peak_monitor = create_peak_monitor(core, DeviceType::Sink, event_callback.clone());
@@ -565,6 +610,16 @@ where
                 return;
             }
 
+            // Try stream nodes first (Stream/Output/Audio, Stream/Input/Audio)
+            if handle_stream_added(
+                global,
+                &registry_for_global,
+                &streams_for_global,
+                event_callback_for_streams.clone(),
+            ) {
+                return;
+            }
+
             handle_node_added(
                 global,
                 &registry_for_global,
@@ -580,6 +635,11 @@ where
             let mut devs = nodes_for_remove.borrow_mut();
             if devs.remove(&id).is_some() {
                 event_callback_for_remove(AudioEvent::DeviceRemoved(id));
+                return;
+            }
+            let mut streams = streams_for_remove.borrow_mut();
+            if streams.remove(&id).is_some() {
+                event_callback_for_remove(AudioEvent::StreamRemoved(id));
             }
         })
         .register();
@@ -654,6 +714,12 @@ where
                 profile_index,
                 event_callback_for_commands.as_ref(),
             );
+        }
+        AudioCommand::SetStreamVolume(id, volume) => {
+            set_stream_volume(&streams_for_commands, id, volume);
+        }
+        AudioCommand::SetStreamMute(id, muted) => {
+            set_stream_mute(&streams_for_commands, id, muted);
         }
     });
 
@@ -2290,6 +2356,225 @@ fn set_device_profile<F>(
         }
         Err(e) => {
             log::error!("Failed to serialize profile pod: {:?}", e);
+        }
+    }
+}
+
+/// Handle a stream node (application audio). Returns true if this was a stream node.
+fn handle_stream_added<F>(
+    global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+    registry: &pipewire::registry::Registry,
+    streams: &Rc<RefCell<HashMap<u32, StreamState>>>,
+    event_callback: Rc<F>,
+) -> bool
+where
+    F: Fn(AudioEvent) + 'static,
+{
+    if global.type_ != ObjectType::Node {
+        return false;
+    }
+
+    let props = match global.props {
+        Some(props) => props,
+        None => return false,
+    };
+
+    let media_class = match props.get("media.class") {
+        Some(mc) => mc,
+        None => return false,
+    };
+
+    let is_output = if media_class == "Stream/Output/Audio" {
+        true
+    } else if media_class == "Stream/Input/Audio" {
+        false
+    } else {
+        return false;
+    };
+
+    // Filter out non-application streams (like GNOME Control Center does):
+    // - DSP nodes (filters, effects, peak monitors)
+    // - Event sounds (notification bleeps)
+    // - Streams without a real application client
+    let media_role = props.get("media.role").unwrap_or("");
+    if media_role == "DSP" || media_role == "event" {
+        return true;
+    }
+
+    // Only show streams from real applications (must have application.name or process.binary)
+    let has_app = props.get("application.name").is_some()
+        || props.get("application.process.binary").is_some();
+    if !has_app {
+        return true;
+    }
+
+    let id = global.id;
+
+    let app_name = props
+        .get("application.name")
+        .or_else(|| props.get("application.process.binary"))
+        .unwrap_or("Unknown")
+        .to_string();
+
+    let name = props
+        .get("media.name")
+        .unwrap_or(&app_name)
+        .to_string();
+
+    let icon_name = props.get("application.icon-name").map(|s| s.to_string());
+
+    let info = StreamInfo {
+        id,
+        name,
+        app_name,
+        icon_name,
+        volume: 1.0,
+        is_muted: false,
+        is_output,
+    };
+
+    let node: pipewire::node::Node = match registry.bind(global) {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("Failed to bind stream node {}: {}", id, e);
+            return true;
+        }
+    };
+
+    let streams_for_listener = streams.clone();
+    let event_callback_for_param = event_callback.clone();
+
+    let listener = node
+        .add_listener_local()
+        .param(move |_seq, param_type, _index, _next, param| {
+            if param_type != ParamType::Props {
+                return;
+            }
+
+            let Some(pod) = param else { return };
+
+            if let Some((volume, muted, channel_count)) = parse_audio_props(pod) {
+                let mut streams = streams_for_listener.borrow_mut();
+                if let Some(state) = streams.get_mut(&id) {
+                    state.channel_count = channel_count;
+                    let volume_delta = (state.info.volume - volume).abs();
+                    let changed = volume_delta > 0.001 || state.info.is_muted != muted;
+                    state.info.volume = volume;
+                    state.info.is_muted = muted;
+
+                    if changed {
+                        let info = state.info.clone();
+                        drop(streams);
+                        event_callback_for_param(AudioEvent::StreamChanged(info));
+                    }
+                }
+            }
+        })
+        .register();
+
+    node.subscribe_params(&[ParamType::Props]);
+    node.enum_params(0, Some(ParamType::Props), 0, u32::MAX);
+
+    log::debug!(
+        "Added {} stream: {} ({}) id={}",
+        if is_output { "output" } else { "input" },
+        info.app_name,
+        info.name,
+        id
+    );
+
+    let state = StreamState {
+        info: info.clone(),
+        node,
+        _listener: listener,
+        channel_count: 2,
+    };
+
+    streams.borrow_mut().insert(id, state);
+    event_callback(AudioEvent::StreamAdded(info));
+
+    true
+}
+
+/// Set volume for an application stream
+fn set_stream_volume(
+    streams: &Rc<RefCell<HashMap<u32, StreamState>>>,
+    id: u32,
+    volume: f64,
+) {
+    let streams = streams.borrow();
+    let Some(state) = streams.get(&id) else {
+        log::warn!("set_stream_volume: stream {} not found", id);
+        return;
+    };
+
+    let volume_f32 = volume as f32;
+    let channel_count = state.channel_count.max(1) as usize;
+    let volumes: Vec<f32> = vec![volume_f32; channel_count];
+
+    let obj = Object {
+        type_: SPA_TYPE_OBJECT_Props,
+        id: SPA_PARAM_Props,
+        properties: vec![
+            Property {
+                key: SPA_PROP_channelVolumes,
+                flags: PropertyFlags::empty(),
+                value: Value::ValueArray(ValueArray::Float(volumes)),
+            },
+            Property {
+                key: SPA_PROP_volume,
+                flags: PropertyFlags::empty(),
+                value: Value::Float(volume_f32),
+            },
+        ],
+    };
+
+    let mut buffer = vec![0u8; 512];
+    match PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(obj)) {
+        Ok((_, len)) => {
+            buffer.truncate(len as usize);
+            if let Some(pod) = Pod::from_bytes(&buffer) {
+                state.node.set_param(ParamType::Props, 0, pod);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to serialize stream volume pod: {:?}", e);
+        }
+    }
+}
+
+/// Set mute state for an application stream
+fn set_stream_mute(
+    streams: &Rc<RefCell<HashMap<u32, StreamState>>>,
+    id: u32,
+    muted: bool,
+) {
+    let streams = streams.borrow();
+    let Some(state) = streams.get(&id) else {
+        log::warn!("set_stream_mute: stream {} not found", id);
+        return;
+    };
+
+    let obj = Object {
+        type_: SPA_TYPE_OBJECT_Props,
+        id: SPA_PARAM_Props,
+        properties: vec![Property {
+            key: SPA_PROP_mute,
+            flags: PropertyFlags::empty(),
+            value: Value::Bool(muted),
+        }],
+    };
+
+    let mut buffer = vec![0u8; 128];
+    match PodSerializer::serialize(Cursor::new(&mut buffer), &Value::Object(obj)) {
+        Ok((_, len)) => {
+            buffer.truncate(len as usize);
+            if let Some(pod) = Pod::from_bytes(&buffer) {
+                state.node.set_param(ParamType::Props, 0, pod);
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to serialize stream mute pod: {:?}", e);
         }
     }
 }

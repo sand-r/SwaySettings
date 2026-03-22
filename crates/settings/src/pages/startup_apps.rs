@@ -179,26 +179,6 @@ impl StartupAppsContent {
 
         choices.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-        let dialog = gtk4::Dialog::builder()
-            .title("Choose Application")
-            .modal(true)
-            .default_width(560)
-            .default_height(520)
-            .build();
-
-        if let Some(window) = self
-            .root()
-            .and_then(|root| root.downcast::<gtk4::Window>().ok())
-        {
-            dialog.set_transient_for(Some(&window));
-        }
-
-        dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
-        dialog.add_button("Add", gtk4::ResponseType::Accept);
-        dialog.set_default_response(gtk4::ResponseType::Accept);
-
-        let content_area = dialog.content_area();
-
         let scrolled = gtk4::ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Never)
             .vexpand(true)
@@ -207,7 +187,6 @@ impl StartupAppsContent {
 
         let list = gtk4::ListBox::new();
         list.set_selection_mode(gtk4::SelectionMode::Single);
-        list.set_activate_on_single_click(true);
         list.add_css_class("boxed-list");
 
         for choice in &choices {
@@ -237,42 +216,55 @@ impl StartupAppsContent {
             list.select_row(Some(&row));
         }
 
+        scrolled.set_child(Some(&list));
+
+        let dialog = libadwaita::AlertDialog::builder()
+            .heading("Choose Application")
+            .close_response("cancel")
+            .default_response("add")
+            .extra_child(&scrolled)
+            .width_request(560)
+            .height_request(520)
+            .build();
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("add", "Add");
+        dialog.set_response_appearance("add", libadwaita::ResponseAppearance::Suggested);
+
+        // Double-click a row to accept
         let dialog_for_activate = dialog.clone();
         list.connect_row_activated(move |_, _| {
-            dialog_for_activate.response(gtk4::ResponseType::Accept);
+            dialog_for_activate.emit_by_name::<()>("response", &[&"add"]);
         });
 
-        scrolled.set_child(Some(&list));
-        content_area.append(&scrolled);
-
-        dialog.connect_response(clone!(
-            #[weak(rename_to = this)]
-            self,
-            #[strong]
-            list,
-            #[strong]
-            choices,
-            move |dialog, response| {
-                if response == gtk4::ResponseType::Accept {
-                    let selected_index = list.selected_row().map(|row| row.index() as usize);
-                    if let Some(index) = selected_index {
-                        if let Some(choice) = choices.get(index) {
-                            if let Err(err) = create_startup_entry(choice) {
-                                log::warn!(
-                                    "Failed to create startup entry for '{}': {err}",
-                                    choice.name
-                                );
+        let parent = self.root();
+        dialog.choose(
+            parent.as_ref(),
+            None::<&gio::Cancellable>,
+            clone!(
+                #[weak(rename_to = this)]
+                self,
+                #[strong]
+                list,
+                #[strong]
+                choices,
+                move |response| {
+                    if response.as_str() == "add" {
+                        let selected_index = list.selected_row().map(|row| row.index() as usize);
+                        if let Some(index) = selected_index {
+                            if let Some(choice) = choices.get(index) {
+                                if let Err(err) = create_startup_entry(choice) {
+                                    log::warn!(
+                                        "Failed to create startup entry for '{}': {err}",
+                                        choice.name
+                                    );
+                                }
+                                this.refresh_rows();
                             }
-                            this.refresh_rows();
                         }
                     }
                 }
-
-                dialog.close();
-            }
-        ));
-
-        dialog.present();
+            ),
+        );
     }
 }
 

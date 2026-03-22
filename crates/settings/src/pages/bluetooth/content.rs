@@ -213,7 +213,7 @@ impl BluetoothContent {
             self,
             #[upgrade_or]
             Some(false),
-            move |request| { obj.handle_agent_request(request) }
+            move |request| obj.handle_agent_request(request)
         ));
 
         // Start the daemon
@@ -379,7 +379,7 @@ impl BluetoothContent {
         let imp = self.imp();
         let daemon = imp.daemon.borrow();
         let Some(daemon) = daemon.as_ref() else {
-            imp.stack.set_visible_child_name("status");
+            imp.stack.set_visible_child_name("placeholder");
             imp.status_page.set_title("Bluetooth Unavailable");
             imp.status_page
                 .set_description(Some("Bluetooth service is not running"));
@@ -387,7 +387,7 @@ impl BluetoothContent {
         };
 
         if !daemon.is_service_available() {
-            imp.stack.set_visible_child_name("status");
+            imp.stack.set_visible_child_name("placeholder");
             imp.status_page.set_title("Bluetooth Unavailable");
             imp.status_page
                 .set_description(Some("Bluetooth service is not running"));
@@ -396,14 +396,14 @@ impl BluetoothContent {
 
         let adapters = daemon.adapters();
         if adapters.is_empty() {
-            imp.stack.set_visible_child_name("status");
+            imp.stack.set_visible_child_name("placeholder");
             imp.status_page.set_title("No Bluetooth Adapters");
             imp.status_page
                 .set_description(Some("No Bluetooth adapters were found on this system"));
             return;
         }
 
-        imp.stack.set_visible_child_name("content");
+        imp.stack.set_visible_child_name("page");
 
         // Update power switch state with guard to prevent feedback loop
         let is_powered = daemon.is_powered();

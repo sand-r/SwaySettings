@@ -52,7 +52,7 @@ impl BluezAgentManager {
         Ok(())
     }
 
-    /// Unregister a previously registered agent.
+    #[allow(dead_code)]
     pub async fn unregister_agent(&self, agent_path: &str) -> Result<(), glib::Error> {
         let path = ObjectPath::try_from(agent_path)
             .map_err(|e| glib::Error::new(gio::IOErrorEnum::InvalidArgument, &e.to_string()))?;

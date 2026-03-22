@@ -66,12 +66,12 @@ impl BluezAgent {
         })
     }
 
-    /// Get the agent's object path.
+    #[allow(dead_code)]
     pub fn object_path(&self) -> &str {
         AGENT_PATH
     }
 
-    /// Get the agent's capability string.
+    #[allow(dead_code)]
     pub fn capability(&self) -> &str {
         AGENT_CAPABILITY
     }
@@ -89,7 +89,7 @@ impl BluezAgent {
         *self.callback.borrow_mut() = Some(Box::new(callback));
     }
 
-    /// Clear the callback.
+    #[allow(dead_code)]
     pub fn clear_callback(&self) {
         *self.callback.borrow_mut() = None;
     }
