@@ -12,7 +12,7 @@ use libadwaita::subclass::prelude::*;
 
 use super::audio_device::AudioDevice;
 use super::profile_item::ProfileItem;
-use crate::services::pipewire::{
+use crate::services::audio::{
     cubic_to_linear, linear_to_cubic, AudioDaemon, AudioEvent, DeviceType, ProfileInfo,
     StreamInfo,
 };
@@ -76,7 +76,9 @@ mod imp {
         pub input_profiles: RefCell<gio::ListStore>,
         pub(super) profiles: RefCell<HashMap<u32, ProfileState>>,
         pub daemon: RefCell<Option<Rc<AudioDaemon>>>,
-        pub updating_ui: Cell<bool>,
+        /// Depth counter: >0 while the UI is being synced from server
+        /// state, so widget signals must not be treated as user intent.
+        pub ui_updates: Cell<u32>,
     }
 
     impl Default for SoundContent {
@@ -105,7 +107,7 @@ mod imp {
                 input_profiles: RefCell::new(gio::ListStore::new::<ProfileItem>()),
                 profiles: RefCell::new(HashMap::new()),
                 daemon: RefCell::new(None),
-                updating_ui: Cell::new(false),
+                ui_updates: Cell::new(0),
             }
         }
     }
@@ -148,9 +150,37 @@ glib::wrapper! {
         @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
 }
 
+/// Held while the page syncs its widgets from server state. Widget signals
+/// fired during that window are the UI echoing the server, not the user
+/// asking for a change, and must never be written back.
+///
+/// Reentrant: nested freezes keep the page frozen until the last one drops,
+/// and drop order guarantees it is released on every path, including early
+/// returns and panics.
+#[must_use = "the UI stays frozen only while this guard is alive"]
+pub(crate) struct UiFreeze(SoundContent);
+
+impl Drop for UiFreeze {
+    fn drop(&mut self) {
+        let depth = &self.0.imp().ui_updates;
+        depth.set(depth.get().saturating_sub(1));
+    }
+}
+
 impl SoundContent {
     pub fn new() -> Self {
         glib::Object::builder().build()
+    }
+
+    /// True while the page is applying server state to its widgets.
+    fn ui_frozen(&self) -> bool {
+        self.imp().ui_updates.get() > 0
+    }
+
+    fn freeze_ui(&self) -> UiFreeze {
+        let depth = &self.imp().ui_updates;
+        depth.set(depth.get() + 1);
+        UiFreeze(self.clone())
     }
 
     fn setup(&self) {
@@ -358,7 +388,7 @@ impl SoundContent {
             move |slider| {
                 let imp = this.imp();
 
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -379,7 +409,7 @@ impl SoundContent {
             self,
             move |toggle| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -399,7 +429,7 @@ impl SoundContent {
             self,
             move |row| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -425,7 +455,7 @@ impl SoundContent {
             self,
             move |row| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -466,7 +496,7 @@ impl SoundContent {
             move |slider| {
                 let imp = this.imp();
 
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -489,7 +519,7 @@ impl SoundContent {
             self,
             move |toggle| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -509,7 +539,7 @@ impl SoundContent {
             self,
             move |row| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -535,7 +565,7 @@ impl SoundContent {
             self,
             move |row| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
 
@@ -567,32 +597,34 @@ impl SoundContent {
     }
 
     fn start_daemon(&self) {
-        use std::sync::mpsc;
-
-        let (sender, receiver) = mpsc::channel::<AudioEvent>();
-
+        // The daemon runs on the GLib main loop; events arrive synchronously
+        // on this thread.
+        let this = self.downgrade();
         let daemon = Rc::new(AudioDaemon::new(move |event| {
-            let _ = sender.send(event);
+            if let Some(this) = this.upgrade() {
+                this.handle_event(event);
+            }
         }));
 
         self.imp().daemon.replace(Some(daemon));
 
-        // Poll for events on the GTK main thread
-        glib::timeout_add_local(
-            std::time::Duration::from_millis(50),
-            clone!(
-                #[weak(rename_to = this)]
-                self,
-                #[upgrade_or]
-                glib::ControlFlow::Break,
-                move || {
-                    while let Ok(event) = receiver.try_recv() {
-                        this.handle_event(event);
-                    }
-                    glib::ControlFlow::Continue
-                }
-            ),
-        );
+        // Peak metering opens capture streams (including the microphone), so
+        // it must only run while the page is actually on screen.
+        self.connect_map(|this| {
+            if let Some(daemon) = this.imp().daemon.borrow().as_ref() {
+                daemon.set_metering(true);
+            }
+        });
+        self.connect_unmap(|this| {
+            if let Some(daemon) = this.imp().daemon.borrow().as_ref() {
+                daemon.set_metering(false);
+            }
+        });
+        if self.is_mapped() {
+            if let Some(daemon) = self.imp().daemon.borrow().as_ref() {
+                daemon.set_metering(true);
+            }
+        }
     }
 
     fn handle_event(&self, event: AudioEvent) {
@@ -653,9 +685,15 @@ impl SoundContent {
         }
     }
 
-    fn add_device(&self, info: &crate::services::pipewire::DeviceInfo) {
+    fn add_device(&self, info: &crate::services::audio::DeviceInfo) {
         let imp = self.imp();
         let device = AudioDevice::from_info(info);
+
+        // Appending to the model is enough to move the ComboRow's selection:
+        // its GtkSingleSelection auto-selects the first item. That is not a
+        // user choice, and pushing it back as a new default would re-route
+        // audio simply because the page was opened.
+        let _freeze = self.freeze_ui();
 
         match info.device_type {
             DeviceType::Sink => {
@@ -667,11 +705,9 @@ impl SoundContent {
                 imp.output_no_devices_group.set_visible(false);
 
                 // Select first device if none selected, but don't update controls yet
-                // (wait for DeviceChanged with actual volume from PipeWire)
+                // (wait for DeviceChanged with the actual volume from the server)
                 if imp.output_device_row.selected() == gtk4::INVALID_LIST_POSITION {
-                    imp.updating_ui.set(true);
                     imp.output_device_row.set_selected(0);
-                    imp.updating_ui.set(false);
                 }
             }
             DeviceType::Source => {
@@ -683,12 +719,12 @@ impl SoundContent {
                 imp.input_no_devices_group.set_visible(false);
 
                 if imp.input_device_row.selected() == gtk4::INVALID_LIST_POSITION {
-                    imp.updating_ui.set(true);
                     imp.input_device_row.set_selected(0);
-                    imp.updating_ui.set(false);
                 }
             }
         }
+
+        drop(_freeze);
 
         self.refresh_profile_rows();
     }
@@ -696,24 +732,31 @@ impl SoundContent {
     fn remove_device(&self, id: u32) {
         let imp = self.imp();
 
-        // Try sinks first
-        {
-            let sinks = imp.sinks.borrow();
-            if let Some(pos) = self.find_device_position(&sinks, id) {
-                sinks.remove(pos);
+        // Removing the selected item makes GTK move the selection. That must
+        // not be mistaken for the user picking a device, or unplugging one
+        // would push a new default onto the server.
+        let _freeze = self.freeze_ui();
 
-                // Show no-devices placeholder if empty
-                if sinks.n_items() == 0 {
-                    imp.output_group.set_visible(false);
-                    imp.output_no_devices_group.set_visible(true);
+        // Try sinks first
+        let removed = {
+            let sinks = imp.sinks.borrow();
+            match self.find_device_position(&sinks, id) {
+                Some(pos) => {
+                    sinks.remove(pos);
+
+                    // Show no-devices placeholder if empty
+                    if sinks.n_items() == 0 {
+                        imp.output_group.set_visible(false);
+                        imp.output_no_devices_group.set_visible(true);
+                    }
+                    true
                 }
-                self.refresh_profile_rows();
-                return;
+                None => false,
             }
-        }
+        };
 
         // Then sources
-        {
+        if !removed {
             let sources = imp.sources.borrow();
             if let Some(pos) = self.find_device_position(&sources, id) {
                 sources.remove(pos);
@@ -726,12 +769,14 @@ impl SoundContent {
             }
         }
 
+        drop(_freeze);
+
         self.refresh_profile_rows();
     }
 
-    fn update_device(&self, info: &crate::services::pipewire::DeviceInfo) {
+    fn update_device(&self, info: &crate::services::audio::DeviceInfo) {
         let imp = self.imp();
-        imp.updating_ui.set(true);
+        let _freeze = self.freeze_ui();
 
         match info.device_type {
             DeviceType::Sink => {
@@ -760,16 +805,13 @@ impl SoundContent {
                 }
             }
         }
-
-        imp.updating_ui.set(false);
     }
 
     fn update_default(&self, device_type: DeviceType, id: Option<u32>) {
         let imp = self.imp();
-        imp.updating_ui.set(true);
+        let _freeze = self.freeze_ui();
 
         let Some(id) = id else {
-            imp.updating_ui.set(false);
             return;
         };
 
@@ -817,7 +859,7 @@ impl SoundContent {
             }
         }
 
-        imp.updating_ui.set(false);
+        drop(_freeze);
 
         // Update profile rows to reflect newly selected device
         self.refresh_profile_rows();
@@ -929,7 +971,7 @@ impl SoundContent {
                 .then_with(|| a.display_name().cmp(b.display_name()))
         });
 
-        imp.updating_ui.set(true);
+        let _freeze = self.freeze_ui();
         {
             let store = store.borrow_mut();
             store.remove_all();
@@ -972,7 +1014,7 @@ impl SoundContent {
                 row.set_selected(gtk4::INVALID_LIST_POSITION);
             }
         }
-        imp.updating_ui.set(false);
+        drop(_freeze);
 
         row.set_visible(true);
     }
@@ -1015,7 +1057,7 @@ impl SoundContent {
             return;
         };
 
-        imp.updating_ui.set(true);
+        let _freeze = self.freeze_ui();
 
         // Find the slider and mute toggle inside the row
         if let Some(slider) = find_child_by_name::<gtk4::Scale>(row, "stream-slider") {
@@ -1043,8 +1085,6 @@ impl SoundContent {
             };
             toggle.set_icon_name(icon);
         }
-
-        imp.updating_ui.set(false);
     }
 
     fn build_stream_row(&self, info: &StreamInfo) -> gtk4::Box {
@@ -1112,7 +1152,7 @@ impl SoundContent {
             self,
             move |slider| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
                 if let Some(daemon) = imp.daemon.borrow().as_ref() {
@@ -1128,7 +1168,7 @@ impl SoundContent {
             self,
             move |toggle| {
                 let imp = this.imp();
-                if imp.updating_ui.get() {
+                if this.ui_frozen() {
                     return;
                 }
                 if let Some(daemon) = imp.daemon.borrow().as_ref() {
@@ -1302,12 +1342,48 @@ impl Default for SoundContent {
     }
 }
 
+/// True when the icon theme can actually render `name`.
+fn icon_exists(name: &str) -> bool {
+    gdk4::Display::default()
+        .map(|display| gtk4::IconTheme::for_display(&display).has_icon(name))
+        .unwrap_or(false)
+}
+
+/// Resolve a PulseAudio `device.icon_name` to an icon the theme really has.
+///
+/// The server reports qualified names like "audio-headphones-bluetooth", which
+/// have no symbolic variant, so trailing qualifiers are dropped until an icon
+/// resolves ("audio-headphones-symbolic"). Without this, GTK renders a blank
+/// placeholder.
+fn resolve_themed_icon(icon: &str) -> Option<String> {
+    resolve_themed_icon_with(icon, icon_exists)
+}
+
+fn resolve_themed_icon_with(icon: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
+    let mut candidate = icon;
+    loop {
+        let symbolic = format!("{candidate}-symbolic");
+        if exists(&symbolic) {
+            return Some(symbolic);
+        }
+        if exists(candidate) {
+            return Some(candidate.to_string());
+        }
+        match candidate.rsplit_once('-') {
+            Some((head, _)) if !head.is_empty() => candidate = head,
+            _ => return None,
+        }
+    }
+}
+
 /// Get the icon name for an audio device
-/// Uses PipeWire's device.icon_name if available, otherwise falls back to heuristics
+/// Uses the server's device.icon_name if the theme has it, otherwise heuristics
 fn get_device_icon(device: &AudioDevice) -> String {
-    // First try PipeWire's icon
+    // First try the server's icon
     if let Some(icon) = device.icon_name() {
-        return format!("{}-symbolic", icon);
+        if let Some(resolved) = resolve_themed_icon(&icon) {
+            return resolved;
+        }
     }
 
     // Fallback based on device name/description
@@ -1355,4 +1431,103 @@ fn find_child_by_name<T: glib::prelude::IsA<gtk4::Widget>>(parent: &gtk4::Box, n
         child = widget.next_sibling();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pactl(args: &[&str]) -> String {
+        let out = std::process::Command::new("pactl")
+            .args(args)
+            .output()
+            .expect("pactl is required for this test");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// Regression test: building the page must never re-route audio.
+    ///
+    /// Appending devices to the model moves the ComboRow's selection on its
+    /// own, which previously looked like the user picking a device and pushed
+    /// the first enumerated sink to the server as the new default — so merely
+    /// opening Settings moved playback off Bluetooth headphones.
+    ///
+    ///     cargo test -p swaysettings -- --ignored --nocapture does_not_change
+    #[test]
+    #[ignore = "requires a display and a running PulseAudio server"]
+    fn opening_the_page_does_not_change_the_default_device() {
+        gtk4::init().expect("failed to init GTK");
+        let _ = libadwaita::init();
+        swaysettings_core::resources::init_resources();
+
+        let sink_before = pactl(&["get-default-sink"]);
+        let source_before = pactl(&["get-default-source"]);
+        println!("before: sink={sink_before} source={source_before}");
+
+        let page = SoundContent::new();
+
+        let context = glib::MainContext::default();
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(3) {
+            context.iteration(false);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        let sink_after = pactl(&["get-default-sink"]);
+        let source_after = pactl(&["get-default-source"]);
+        println!("after:  sink={sink_after} source={source_after}");
+
+        let n_sinks = page.imp().sinks.borrow().n_items();
+        println!("page enumerated {n_sinks} sinks");
+        assert!(n_sinks > 0, "page enumerated no devices; test proves nothing");
+
+        assert_eq!(
+            sink_before, sink_after,
+            "opening the Sound page changed the default sink"
+        );
+        assert_eq!(
+            source_before, source_after,
+            "opening the Sound page changed the default source"
+        );
+    }
+
+    /// A stand-in for the Adwaita subset these devices land on.
+    fn theme(name: &str) -> bool {
+        matches!(
+            name,
+            "audio-headphones-symbolic"
+                | "audio-speakers-symbolic"
+                | "audio-card-symbolic"
+                | "video-display-symbolic"
+        )
+    }
+
+    #[test]
+    fn qualified_icon_names_fall_back_to_a_real_icon() {
+        // PulseAudio reports this for Bluetooth headphones; the fully
+        // qualified symbolic variant does not exist in the theme.
+        assert_eq!(
+            resolve_themed_icon_with("audio-headphones-bluetooth", theme).as_deref(),
+            Some("audio-headphones-symbolic")
+        );
+    }
+
+    #[test]
+    fn plain_icon_names_resolve_directly() {
+        assert_eq!(
+            resolve_themed_icon_with("audio-speakers", theme).as_deref(),
+            Some("audio-speakers-symbolic")
+        );
+        assert_eq!(
+            resolve_themed_icon_with("video-display", theme).as_deref(),
+            Some("video-display-symbolic")
+        );
+    }
+
+    #[test]
+    fn unknown_icon_names_defer_to_the_heuristics() {
+        assert_eq!(resolve_themed_icon_with("nonsense", theme), None);
+        // Must not over-strip into an unrelated icon.
+        assert_eq!(resolve_themed_icon_with("video-projector", theme), None);
+    }
 }

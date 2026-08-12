@@ -4,7 +4,7 @@ use glib::prelude::*;
 use glib::subclass::prelude::*;
 use glib::Properties;
 
-use crate::services::pipewire::ProfileInfo;
+use crate::services::audio::ProfileInfo;
 
 mod imp {
     use super::*;

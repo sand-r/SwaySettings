@@ -4,7 +4,7 @@ use glib::prelude::*;
 use glib::subclass::prelude::*;
 use glib::Properties;
 
-use crate::services::pipewire::{DeviceInfo, DeviceType};
+use crate::services::audio::{DeviceInfo, DeviceType};
 
 mod imp {
     use super::*;

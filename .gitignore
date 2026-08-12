@@ -14,3 +14,5 @@ build-scripts/*
 
 !pam/*
 !*.service.in
+cargo-build-stamp
+data/swaysettings.gresource

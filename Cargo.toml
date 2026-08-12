@@ -48,7 +48,8 @@ gtk4-session-lock = { version = "0.4.1", features = ["v1_2"] }
 # D-Bus
 zbus = "5"
 
-# Audio
-pipewire = "0.9"
+# Audio (PulseAudio client API, served by pipewire-pulse)
+libpulse-binding = "2.30"
+libpulse-glib-binding = "2.29"
 
 # Auth
