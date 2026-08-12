@@ -13,7 +13,7 @@ BuildRequires:    vala
 BuildRequires:    git
 
 BuildRequires: gtk4-devel >= 4.16
-BuildRequires: pkgconfig(gtk4-layer-shell-0) >= 1.1.1
+BuildRequires: pkgconfig(gtk4-layer-shell-0) >= 1.2.0
 BuildRequires: libadwaita-devel >= 1.6
 BuildRequires: pkgconfig(gsettings-desktop-schemas)
 BuildRequires: granite-7-devel >= 7.5
@@ -44,7 +44,7 @@ Requires: libgtop2
 Requires: udisks2
 Requires: glib2
 Requires: accountsservice
-Requires: gtk4-layer-shell
+Requires: gtk4-layer-shell >= 1.2.0
 Requires: pam
 
 %{?systemd_requires}

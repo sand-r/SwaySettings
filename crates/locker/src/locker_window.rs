@@ -79,10 +79,25 @@ impl LockerWindow {
 
         window.imp().monitor.replace(Some(monitor.clone()));
         window.set_decorated(false);
-        window.set_resizable(false);
         window.set_focusable(true);
-        window.set_default_size(monitor.geometry().width(), monitor.geometry().height());
-        window.fullscreen();
+
+        if crate::should_lock() {
+            // The compositor configures an ext-session-lock surface to the
+            // output's exact dimensions. GTK must be allowed to accept that
+            // size: wlroots rejects any differently sized committed buffer
+            // with EXT_SESSION_LOCK_SURFACE_V1_ERROR_DIMENSIONS_MISMATCH.
+            window.set_resizable(true);
+
+            // A session-lock surface must remain under control of the session-lock
+            // protocol. In particular, never let a regular window close while the
+            // compositor considers the session locked.
+            window.connect_close_request(|_| glib::Propagation::Stop);
+        } else {
+            // Debug mode intentionally uses an ordinary fullscreen window.
+            window.set_resizable(false);
+            window.set_default_size(monitor.geometry().width(), monitor.geometry().height());
+            window.fullscreen();
+        }
 
         window.setup_focus_handling();
         window.setup_password_entry();
@@ -109,9 +124,14 @@ impl LockerWindow {
 
     fn setup_focus_handling(&self) {
         let should_lock = crate::should_lock();
+
+        // ext-session-lock surfaces are not normal XDG toplevels and may never
+        // receive GtkWindow:is-active. The authentication UI must not depend on
+        // that property becoming true.
+        self.imp().revealer.set_reveal_child(true);
+
         self.connect_notify(Some("is-active"), move |win, _| {
             let active = if !should_lock { true } else { win.is_active() };
-            win.imp().revealer.set_reveal_child(active);
             let entry = win.imp().entry.get();
             entry.grab_focus_without_selecting();
             entry.set_position(-1);
@@ -127,6 +147,17 @@ impl LockerWindow {
     fn setup_map_handler(&self) {
         self.connect_map(|win| {
             win.add_css_class("locked");
+
+            if crate::should_lock() {
+                // Session-lock surfaces do not have XDG activation state. Once
+                // mapped, reveal the controls and establish GTK keyboard focus
+                // directly on the shared password entry.
+                win.imp().revealer.set_reveal_child(true);
+                win.imp().entry.grab_focus_without_selecting();
+                win.imp().entry.set_position(-1);
+                win.add_css_class("focused");
+                win.check_fingerprint_on_focus();
+            }
         });
     }
 
@@ -220,16 +251,14 @@ impl LockerWindow {
                 let monitor = self.imp().monitor.borrow();
                 if let Some(ref monitor) = *monitor {
                     let geo = monitor.geometry();
-                    if let Some((scaled, _w, _h)) =
-                        swaysettings_core::functions::gdk_texture_scale(
-                            &texture,
-                            texture.width() as u32,
-                            texture.height() as u32,
-                            geo.width(),
-                            geo.height(),
-                            gsk4::ScalingFilter::Trilinear,
-                        )
-                    {
+                    if let Some((scaled, _w, _h)) = swaysettings_core::functions::gdk_texture_scale(
+                        &texture,
+                        texture.width() as u32,
+                        texture.height() as u32,
+                        geo.width(),
+                        geo.height(),
+                        gsk4::ScalingFilter::Trilinear,
+                    ) {
                         self.imp().picture.set_paintable(Some(&scaled));
                     } else {
                         self.imp().picture.set_paintable(Some(&texture));
@@ -240,9 +269,7 @@ impl LockerWindow {
             }
             Err(e) => {
                 log::error!("Getting background error: {}", e);
-                self.imp()
-                    .picture
-                    .set_paintable(None::<&gdk4::Paintable>);
+                self.imp().picture.set_paintable(None::<&gdk4::Paintable>);
             }
         }
 
@@ -293,9 +320,14 @@ impl LockerWindow {
         if let Some(icon_file) = user.icon_file() {
             if !icon_file.is_empty() {
                 let file = gio::File::for_path(&icon_file);
-                let avatar_height = self.imp().avatar.size();
+                // AdwAvatar::size() is -1 when CSS supplies the size. Measure
+                // the widget so IconPaintable always receives a valid value.
+                let (_, avatar_size, _, _) = self
+                    .imp()
+                    .avatar
+                    .measure(gtk4::Orientation::Horizontal, -1);
                 let paintable =
-                    gtk4::IconPaintable::for_file(&file, avatar_height, self.scale_factor());
+                    gtk4::IconPaintable::for_file(&file, avatar_size, self.scale_factor());
                 self.imp().avatar.set_custom_image(Some(&paintable));
             }
         }
@@ -400,29 +432,38 @@ impl LockerWindow {
 
     pub fn setup_fingerprint_ui(&self) {
         let fprint = FingerprintManager::get_instance();
-        let win = self.clone();
-        let win2 = self.clone();
-        let win3 = self.clone();
+        // The manager is process-global, so its callbacks must not keep a removed
+        // monitor's window alive. main.rs installs fresh callbacks on the next
+        // active window when a monitor disappears.
+        let win = self.downgrade();
+        let win2 = self.downgrade();
+        let win3 = self.downgrade();
 
         fprint.set_callbacks(FingerprintCallbacks {
             on_status_changed: Box::new(move |status, _is_error| {
-                let lock_data = LockData::get();
-                if lock_data.pwd_buffer().length() == 0 {
-                    win.imp().entry.set_placeholder_text(Some(status));
+                if let Some(win) = win.upgrade() {
+                    let lock_data = LockData::get();
+                    if lock_data.pwd_buffer().length() == 0 {
+                        win.imp().entry.set_placeholder_text(Some(status));
+                    }
                 }
             }),
             on_auth_success: Box::new(move || {
-                win2.imp().entry.set_placeholder_text(Some("Unlocked"));
-                win2.imp().entry.set_icon_from_paintable(
-                    gtk4::EntryIconPosition::Primary,
-                    None::<&gdk4::Paintable>,
-                );
+                if let Some(win) = win2.upgrade() {
+                    win.imp().entry.set_placeholder_text(Some("Unlocked"));
+                    win.imp().entry.set_icon_from_paintable(
+                        gtk4::EntryIconPosition::Primary,
+                        None::<&gdk4::Paintable>,
+                    );
+                }
                 FingerprintManager::get_instance().release_device();
                 crate::do_unlock();
             }),
             on_availability_changed: Box::new(move |available| {
                 log::debug!("LockerWindow: availability_changed to {}", available);
-                win3.update_fingerprint_ui(available);
+                if let Some(win) = win3.upgrade() {
+                    win.update_fingerprint_ui(available);
+                }
             }),
         });
 

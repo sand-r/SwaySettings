@@ -22,6 +22,7 @@ libadwaita.workspace = true
 gdk4.workspace = true
 gdk-pixbuf.workspace = true
 gsk4.workspace = true
+gtk4-session-lock.workspace = true
 
 whoami.workspace = true
 libc.workspace = true

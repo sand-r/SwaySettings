@@ -79,7 +79,7 @@ makepkg -si
 - git
 - grim (for screenshotting)
 - gtk4
-- gtk4-layer-shell
+- gtk4-layer-shell >= 1.2.0
 - libadwaita
 - blueprint-compiler
 - granite7
