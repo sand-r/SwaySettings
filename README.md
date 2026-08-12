@@ -110,6 +110,18 @@ meson install -C build
 
 ### Setup and build
 
+When building the Rust locker inside the Codex GNOME SDK, bootstrap its two
+missing link-time dependencies once. They are cached outside `target/`, and the
+repository's Cargo configuration discovers them automatically on later builds:
+
+```sh
+scripts/bootstrap-codex-native-deps.sh
+cargo build -p swaysettings-locker
+```
+
+The PAM shim is only for linking inside the SDK and must not be bundled or added
+to the runtime library path; an installed locker uses the host's real PAM.
+
 ```sh
 meson setup build
 meson compile -C build

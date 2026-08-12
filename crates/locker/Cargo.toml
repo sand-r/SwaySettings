@@ -26,3 +26,4 @@ gtk4-session-lock.workspace = true
 
 whoami.workspace = true
 libc.workspace = true
+zeroize.workspace = true

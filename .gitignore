@@ -1,4 +1,6 @@
 .cache/
+.codex-native/
+/target/
 build
 *.ui~
 *.ui#

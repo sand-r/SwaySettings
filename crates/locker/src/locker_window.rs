@@ -1,4 +1,5 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use gio::prelude::*;
 use glib::clone;
@@ -38,8 +39,8 @@ pub struct LockerWindowImpl {
     pub status: TemplateChild<gtk4::Box>,
 
     pub monitor: RefCell<Option<gdk4::Monitor>>,
-    pub loaded_user_data: Cell<bool>,
     pub busy_guard: RefCell<Option<gio::ApplicationBusyGuard>>,
+    pub user: RefCell<Option<Rc<swaysettings_core::AccountsServiceUser>>>,
 }
 
 #[glib::object_subclass]
@@ -191,19 +192,6 @@ impl LockerWindow {
                 win.password_check();
             }
         ));
-
-        // Suspend fingerprint when typing
-        entry.connect_changed(|entry| {
-            let lock_data = LockData::get();
-            if lock_data.pwd_buffer().length() > 0 {
-                let fprint = FingerprintManager::get_instance();
-                fprint.set_suspended(true);
-                entry.set_icon_from_paintable(
-                    gtk4::EntryIconPosition::Primary,
-                    None::<&gdk4::Paintable>,
-                );
-            }
-        });
     }
 
     fn set_password_visibility(&self) {
@@ -282,28 +270,17 @@ impl LockerWindow {
         glib::MainContext::default().spawn_local(async move {
             match swaysettings_core::AccountsServiceUser::for_current_user().await {
                 Ok(user) => {
+                    let user = Rc::new(user);
                     win.set_user_data(&user);
-                    win.imp().loaded_user_data.set(true);
 
                     let win_weak = win.downgrade();
+                    let user_weak = Rc::downgrade(&user);
                     user.connect_changed(move || {
-                        if let Some(win) = win_weak.upgrade() {
-                            if win.imp().loaded_user_data.get() {
-                                let win2 = win.clone();
-                                glib::MainContext::default().spawn_local(async move {
-                                    if let Ok(u) =
-                                        swaysettings_core::AccountsServiceUser::for_current_user()
-                                            .await
-                                    {
-                                        win2.set_user_data(&u);
-                                    }
-                                });
-                            }
+                        if let (Some(win), Some(user)) = (win_weak.upgrade(), user_weak.upgrade()) {
+                            win.set_user_data(&user);
                         }
                     });
-
-                    // Keep user alive for the signal handler
-                    std::mem::forget(user);
+                    win.imp().user.replace(Some(user));
                 }
                 Err(e) => {
                     log::error!("Failed to get user data: {}", e);
@@ -322,10 +299,8 @@ impl LockerWindow {
                 let file = gio::File::for_path(&icon_file);
                 // AdwAvatar::size() is -1 when CSS supplies the size. Measure
                 // the widget so IconPaintable always receives a valid value.
-                let (_, avatar_size, _, _) = self
-                    .imp()
-                    .avatar
-                    .measure(gtk4::Orientation::Horizontal, -1);
+                let (_, avatar_size, _, _) =
+                    self.imp().avatar.measure(gtk4::Orientation::Horizontal, -1);
                 let paintable =
                     gtk4::IconPaintable::for_file(&file, avatar_size, self.scale_factor());
                 self.imp().avatar.set_custom_image(Some(&paintable));
@@ -341,31 +316,42 @@ impl LockerWindow {
         if lock_data.pwd_buffer().length() == 0 {
             return;
         }
+        if !lock_data.try_begin_auth() {
+            return;
+        }
 
-        self.set_busy(true);
+        // Fingerprint remains available while the user types. Pause it only
+        // while PAM is checking the submitted password so the two mechanisms
+        // cannot complete concurrently.
+        FingerprintManager::get_instance().set_suspended(true);
+        crate::set_authentication_busy(true);
         lock_data.clear_messages();
         self.imp().status_revealer.set_reveal_child(false);
 
-        let password = lock_data.pwd_buffer().text().to_string();
+        let password = zeroize::Zeroizing::new(lock_data.pwd_buffer().text().to_string());
+        // Remove the GTK-side copy immediately. PasswordEntryBuffer stores its
+        // contents in non-pageable memory and clears deleted text.
+        lock_data.pwd_buffer().set_text("");
         let win = self.clone();
-        pam::check_password_async(&password, move |status| {
+        pam::check_password_async(password, move |status| {
             win.password_checked(status);
         });
     }
 
     fn password_checked(&self, status: PamStatus) {
-        self.set_busy(false);
+        LockData::get().finish_auth();
+        crate::set_authentication_busy(false);
 
         match status {
             PamStatus::Error => {
                 log::error!("PAM failed!");
+                LockData::get().add_error("Authentication Error");
             }
             PamStatus::AuthFailed => {
                 log::error!("PAM Auth failed");
                 LockData::get().add_message("Login Failed");
             }
             PamStatus::AuthSuccess => {
-                FingerprintManager::get_instance().release_device();
                 crate::do_unlock();
                 return;
             }
@@ -374,12 +360,14 @@ impl LockerWindow {
         self.imp().entry.grab_focus();
 
         // Resume fingerprint after failed attempt
-        FingerprintManager::get_instance().set_suspended(false);
+        if LockData::get().pwd_buffer().length() == 0 {
+            FingerprintManager::get_instance().set_suspended(false);
+        }
 
         self.set_status();
     }
 
-    fn set_busy(&self, busy: bool) {
+    pub(crate) fn set_busy(&self, busy: bool) {
         if busy {
             if let Some(app) = self.application() {
                 let guard = app.mark_busy();
@@ -456,7 +444,6 @@ impl LockerWindow {
                         None::<&gdk4::Paintable>,
                     );
                 }
-                FingerprintManager::get_instance().release_device();
                 crate::do_unlock();
             }),
             on_availability_changed: Box::new(move |available| {

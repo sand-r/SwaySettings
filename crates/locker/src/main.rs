@@ -60,6 +60,14 @@ pub fn set_fingerprint_initialized(val: bool) {
     FINGERPRINT_INITIALIZED.with(|c| c.set(val));
 }
 
+pub(crate) fn set_authentication_busy(busy: bool) {
+    WINDOWS.with(|windows| {
+        for window in windows.borrow().iter() {
+            window.set_busy(busy);
+        }
+    });
+}
+
 pub fn do_unlock() {
     FingerprintManager::get_instance().release_device();
 
@@ -117,22 +125,20 @@ impl TimeObj {
         let now = chrono::Local::now();
         let sec = now.format("%S").to_string().parse::<u32>().unwrap_or(0);
         let usec = now.timestamp_subsec_micros();
-        let delay_ms = (60 - sec) * 1000 - usec / 1000;
+        let elapsed_ms = u64::from(sec) * 1_000 + u64::from(usec / 1_000);
+        let delay_ms = 60_000u64.saturating_sub(elapsed_ms).max(1);
 
-        glib::timeout_add_local_once(
-            std::time::Duration::from_millis(delay_ms as u64),
-            move || {
-                time_obj.update();
-                let t = time_obj.time();
-                let d = time_obj.date();
-                WINDOWS.with(|windows| {
-                    for win in windows.borrow().iter() {
-                        win.set_date_time(&t, &d);
-                    }
-                });
-                time_obj.schedule();
-            },
-        );
+        glib::timeout_add_local_once(std::time::Duration::from_millis(delay_ms), move || {
+            time_obj.update();
+            let t = time_obj.time();
+            let d = time_obj.date();
+            WINDOWS.with(|windows| {
+                for win in windows.borrow().iter() {
+                    win.set_date_time(&t, &d);
+                }
+            });
+            time_obj.schedule();
+        });
     }
 }
 
@@ -355,6 +361,9 @@ fn create_lock_window(
     time_obj: &TimeObj,
 ) -> LockerWindow {
     let window = LockerWindow::new(app, monitor);
+    if crate::lock_data::LockData::get().auth_in_progress() {
+        window.set_busy(true);
+    }
     window.load_content(settings);
     window.set_date_time(&time_obj.time(), &time_obj.date());
 
@@ -498,7 +507,7 @@ fn daemonize() -> io::Result<()> {
                 notify_daemon(false);
                 Err(io::Error::last_os_error())
             }
-            0 => Ok(()),
+            0 => prepare_daemon_process(),
             _ => {
                 // Intermediate child. The grandchild retains its own copy of
                 // the status writer.
@@ -507,6 +516,31 @@ fn daemonize() -> io::Result<()> {
             }
         }
     }
+}
+
+fn prepare_daemon_process() -> io::Result<()> {
+    unsafe {
+        if libc::chdir(c"/".as_ptr()) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let null_fd = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+        if null_fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        for standard_fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+            if libc::dup2(null_fd, standard_fd) < 0 {
+                let error = io::Error::last_os_error();
+                libc::close(null_fd);
+                return Err(error);
+            }
+        }
+        if null_fd > libc::STDERR_FILENO {
+            libc::close(null_fd);
+        }
+    }
+    Ok(())
 }
 
 fn notify_daemon(success: bool) {

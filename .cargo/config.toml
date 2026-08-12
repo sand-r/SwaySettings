@@ -1,0 +1,6 @@
+# Codex runs inside the GNOME SDK, which does not ship PAM or
+# gtk4-layer-shell. The bootstrap script installs link-time-only native
+# dependencies here. These paths are relative to the repository root.
+[env]
+PKG_CONFIG_PATH = { value = ".codex-native/lib/pkgconfig", relative = true }
+LIBRARY_PATH = { value = ".codex-native/lib", relative = true }

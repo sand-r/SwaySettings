@@ -29,6 +29,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 shell-words = "1"
 whoami = "1"
 libc = "0.2"
+zeroize = "1"
 
 # GTK / GNOME stack (latest alpha for GTK4 4.20 / libadwaita 1.8)
 glib = "0.22.0-alpha.2"

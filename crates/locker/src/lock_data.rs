@@ -1,28 +1,35 @@
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 /// Shared state for the lock screen, equivalent to `LockData` in the Vala implementation.
 /// Shared across all lock windows via a thread-local singleton.
 pub struct LockData {
     pwd_buffer: gtk4::PasswordEntryBuffer,
     show_password: Cell<bool>,
+    auth_in_progress: Cell<bool>,
     messages: RefCell<Vec<String>>,
     errors: RefCell<Vec<String>>,
 }
 
 thread_local! {
-    static INSTANCE: LockData = LockData {
-        pwd_buffer: gtk4::PasswordEntryBuffer::new(),
-        show_password: Cell::new(false),
-        messages: RefCell::new(Vec::new()),
-        errors: RefCell::new(Vec::new()),
-    };
+    static INSTANCE: RefCell<Option<Rc<LockData>>> = const { RefCell::new(None) };
 }
 
 impl LockData {
-    pub fn get() -> &'static LockData {
-        // SAFETY: thread_local! ensures single-threaded access, and the reference
-        // is valid for the lifetime of the thread (which is the main thread).
-        INSTANCE.with(|data| unsafe { &*(data as *const LockData) })
+    pub fn get() -> Rc<LockData> {
+        INSTANCE.with(|cell| {
+            cell.borrow_mut()
+                .get_or_insert_with(|| {
+                    Rc::new(LockData {
+                        pwd_buffer: gtk4::PasswordEntryBuffer::new(),
+                        show_password: Cell::new(false),
+                        auth_in_progress: Cell::new(false),
+                        messages: RefCell::new(Vec::new()),
+                        errors: RefCell::new(Vec::new()),
+                    })
+                })
+                .clone()
+        })
     }
 
     pub fn pwd_buffer(&self) -> &gtk4::PasswordEntryBuffer {
@@ -35,6 +42,20 @@ impl LockData {
 
     pub fn toggle_show_password(&self) {
         self.show_password.set(!self.show_password.get());
+    }
+
+    /// Atomically starts a process-wide password check. Every monitor shares
+    /// this state, so only one PAM conversation can run at a time.
+    pub fn try_begin_auth(&self) -> bool {
+        !self.auth_in_progress.replace(true)
+    }
+
+    pub fn finish_auth(&self) {
+        self.auth_in_progress.set(false);
+    }
+
+    pub fn auth_in_progress(&self) -> bool {
+        self.auth_in_progress.get()
     }
 
     pub fn messages(&self) -> Vec<String> {
