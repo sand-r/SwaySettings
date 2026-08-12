@@ -2,92 +2,84 @@ using Gtk 4.0;
 using Adw 1;
 
 template $SwaySettingsBluetoothContent: Adw.Bin {
-  child: Gtk.Stack stack {
+  child: Stack stack {
+    hhomogeneous: true;
+    vhomogeneous: true;
     transition-type: crossfade;
+    transition-duration: 200;
+    vexpand: true;
 
-    Gtk.StackPage {
-      name: "content";
-
-      child: Gtk.ScrolledWindow {
-        hexpand: true;
-        vexpand: true;
-
-        child: Adw.Clamp {
-          maximum-size: 600;
-          tightening-threshold: 400;
-          margin-top: 24;
-          margin-bottom: 24;
-          margin-start: 16;
-          margin-end: 16;
-
-          child: Gtk.Box {
-            orientation: vertical;
-            spacing: 24;
-            valign: start;
-
-            Adw.PreferencesGroup toggle_group {
-              Adw.SwitchRow power_switch {
-                title: "Bluetooth";
-                subtitle: "Enable Bluetooth to discover and connect to devices";
-              }
-            }
-
-            Adw.PreferencesGroup paired_group {
-              title: "Paired Devices";
-              visible: false;
-
-              Gtk.ListBox paired_list_box {
-                selection-mode: none;
-
-                styles [
-                  "boxed-list",
-                ]
-              }
-            }
-
-            Adw.PreferencesGroup nearby_group {
-              title: "Nearby Devices";
-              visible: false;
-
-              header-suffix: Gtk.Box {
-                spacing: 8;
-                valign: center;
-
-                Gtk.Spinner discovery_spinner {
-                  visible: false;
-                  spinning: true;
-                }
-
-                Gtk.Button scan_button {
-                  label: "Scan";
-                  valign: center;
-
-                  styles [
-                    "flat",
-                  ]
-                }
-              };
-
-              Gtk.ListBox nearby_list_box {
-                selection-mode: none;
-
-                styles [
-                  "boxed-list",
-                ]
-              }
-            }
-          };
-        };
-      };
-    }
-
-    Gtk.StackPage {
-      name: "status";
+    StackPage {
+      name: "placeholder";
 
       child: Adw.StatusPage status_page {
         icon-name: "bluetooth-symbolic";
         title: "Bluetooth Unavailable";
         description: "No Bluetooth adapters found";
+        vexpand: true;
+      };
+    }
+
+    StackPage {
+      name: "page";
+
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
+
+        child: Adw.PreferencesPage {
+          Adw.PreferencesGroup toggle_group {
+            Adw.SwitchRow power_switch {
+              title: "Bluetooth";
+              subtitle: "Enable Bluetooth to discover and connect to devices";
+            }
+          }
+
+          Adw.PreferencesGroup paired_group {
+            title: "Paired Devices";
+            visible: false;
+
+            Gtk.ListBox paired_list_box {
+              selection-mode: none;
+
+              styles [
+                "boxed-list",
+              ]
+            }
+          }
+
+          Adw.PreferencesGroup nearby_group {
+            title: "Nearby Devices";
+            visible: false;
+
+            header-suffix: Gtk.Box {
+              spacing: 8;
+              valign: center;
+
+              Gtk.Spinner discovery_spinner {
+                visible: false;
+                spinning: true;
+              }
+
+              Gtk.Button scan_button {
+                label: "Scan";
+                valign: center;
+
+                styles [
+                  "flat",
+                ]
+              }
+            };
+
+            Gtk.ListBox nearby_list_box {
+              selection-mode: none;
+
+              styles [
+                "boxed-list",
+              ]
+            }
+          }
+        };
       };
     }
   };

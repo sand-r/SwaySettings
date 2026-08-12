@@ -2,185 +2,208 @@ using Gtk 4.0;
 using Adw 1;
 
 template $SwaySettingsSoundContent: Adw.Bin {
-  child: ScrolledWindow {
-    hscrollbar-policy: never;
+  child: Stack stack {
+    hhomogeneous: true;
+    vhomogeneous: true;
+    transition-type: crossfade;
+    transition-duration: 200;
     vexpand: true;
 
-    child: Adw.PreferencesPage {
-      // Output section with devices
-      Adw.PreferencesGroup output_group {
-        title: "Output";
+    StackPage {
+      name: "placeholder";
 
-        header-suffix: LevelBar output_level_bar {
-          valign: center;
-          width-request: 40;
-          min-value: 0;
-          max-value: 1;
-          mode: continuous;
+      child: Adw.StatusPage {
+        icon-name: "audio-speakers-symbolic";
+        title: "No Sound Service";
+        description: "PipeWire audio service is not available";
+        vexpand: true;
+      };
+    }
 
-          styles [
-            "audio-level"
-          ]
-        };
+    StackPage {
+      name: "page";
 
-        Adw.ComboRow output_device_row {
-          title: "Output Device";
-          use-underline: true;
-        }
+      child: ScrolledWindow {
+        hscrollbar-policy: never;
+        vexpand: true;
 
-        Adw.ComboRow output_profile_row {
-          title: "Configuration";
-          use-underline: true;
-          visible: false;
-        }
+        child: Adw.PreferencesPage {
+          // Output section with devices
+          Adw.PreferencesGroup output_group {
+            title: "Output";
 
-        Adw.PreferencesRow {
-          activatable: false;
+            header-suffix: LevelBar output_level_bar {
+              valign: center;
+              width-request: 40;
+              min-value: 0;
+              max-value: 1;
+              mode: continuous;
 
-          Box {
-            margin-top: 12;
-            margin-bottom: 12;
-            margin-start: 12;
-            margin-end: 12;
-            spacing: 12;
+              styles [
+                "audio-level"
+              ]
+            };
 
-            Label output_volume_label {
-              ellipsize: end;
-              xalign: 0;
-              label: "Output Volume";
+            Adw.ComboRow output_device_row {
+              title: "Output Device";
               use-underline: true;
             }
 
-            ToggleButton output_mute_toggle {
-              icon-name: "audio-volume-high-symbolic";
+            Adw.ComboRow output_profile_row {
+              title: "Configuration";
+              use-underline: true;
+              visible: false;
+            }
+
+            Adw.PreferencesRow {
+              activatable: false;
+
+              Box {
+                margin-top: 12;
+                margin-bottom: 12;
+                margin-start: 12;
+                margin-end: 12;
+                spacing: 12;
+
+                Label output_volume_label {
+                  ellipsize: end;
+                  xalign: 0;
+                  label: "Output Volume";
+                  use-underline: true;
+                }
+
+                ToggleButton output_mute_toggle {
+                  icon-name: "audio-volume-high-symbolic";
+                  valign: center;
+                  tooltip-text: "Mute";
+
+                  styles [
+                    "flat",
+                  ]
+                }
+
+                Scale output_slider {
+                  adjustment: Adjustment {
+                    page-increment: 10.0;
+                    step-increment: 1.0;
+                    value: 0;
+                    lower: 0;
+                    upper: 100.0;
+                  };
+
+                  hexpand: true;
+                  draw-value: false;
+                }
+              }
+            }
+          }
+
+          // Output section when no devices
+          Adw.PreferencesGroup output_no_devices_group {
+            title: "Output";
+            visible: false;
+
+            Adw.ActionRow {
+              title: "Output Device";
+              subtitle: "No output devices available";
+              activatable: false;
+
+              [prefix]
+              Image {
+                icon-name: "audio-speakers-symbolic";
+              }
+            }
+          }
+
+          // Input section with devices
+          Adw.PreferencesGroup input_group {
+            title: "Input";
+
+            header-suffix: LevelBar input_level_bar {
               valign: center;
-              tooltip-text: "Mute";
+              width-request: 40;
+              min-value: 0;
+              max-value: 1;
+              mode: continuous;
 
               styles [
-                "flat",
+                "audio-level"
               ]
-            }
+            };
 
-            Scale output_slider {
-              adjustment: Adjustment {
-                page-increment: 10.0;
-                step-increment: 1.0;
-                value: 0;
-                lower: 0;
-                upper: 100.0;
-              };
-
-              hexpand: true;
-              draw-value: false;
-            }
-          }
-        }
-      }
-
-      // Output section when no devices
-      Adw.PreferencesGroup output_no_devices_group {
-        title: "Output";
-        visible: false;
-
-        Adw.ActionRow {
-          title: "Output Device";
-          subtitle: "No output devices available";
-          activatable: false;
-
-          [prefix]
-          Image {
-            icon-name: "audio-speakers-symbolic";
-          }
-        }
-      }
-
-      // Input section with devices
-      Adw.PreferencesGroup input_group {
-        title: "Input";
-
-        header-suffix: LevelBar input_level_bar {
-          valign: center;
-          width-request: 40;
-          min-value: 0;
-          max-value: 1;
-          mode: continuous;
-
-          styles [
-            "audio-level"
-          ]
-        };
-
-        Adw.ComboRow input_device_row {
-          title: "Input Device";
-          use-underline: true;
-        }
-
-        Adw.ComboRow input_profile_row {
-          title: "Configuration";
-          use-underline: true;
-          visible: false;
-        }
-
-        Adw.PreferencesRow {
-          activatable: false;
-
-          Box {
-            margin-top: 12;
-            margin-bottom: 12;
-            margin-start: 12;
-            margin-end: 12;
-            spacing: 12;
-
-            Label input_volume_label {
-              ellipsize: end;
-              xalign: 0;
-              label: "Input Volume";
+            Adw.ComboRow input_device_row {
+              title: "Input Device";
               use-underline: true;
             }
 
-            ToggleButton input_mute_toggle {
-              icon-name: "microphone-sensitivity-high-symbolic";
-              valign: center;
-              tooltip-text: "Mute";
-
-              styles [
-                "flat",
-              ]
+            Adw.ComboRow input_profile_row {
+              title: "Configuration";
+              use-underline: true;
+              visible: false;
             }
 
-            Scale input_slider {
-              adjustment: Adjustment {
-                page-increment: 10.0;
-                step-increment: 1.0;
-                value: 0;
-                lower: 0;
-                upper: 100.0;
-              };
+            Adw.PreferencesRow {
+              activatable: false;
 
-              hexpand: true;
-              draw-value: false;
+              Box {
+                margin-top: 12;
+                margin-bottom: 12;
+                margin-start: 12;
+                margin-end: 12;
+                spacing: 12;
+
+                Label input_volume_label {
+                  ellipsize: end;
+                  xalign: 0;
+                  label: "Input Volume";
+                  use-underline: true;
+                }
+
+                ToggleButton input_mute_toggle {
+                  icon-name: "microphone-sensitivity-high-symbolic";
+                  valign: center;
+                  tooltip-text: "Mute";
+
+                  styles [
+                    "flat",
+                  ]
+                }
+
+                Scale input_slider {
+                  adjustment: Adjustment {
+                    page-increment: 10.0;
+                    step-increment: 1.0;
+                    value: 0;
+                    lower: 0;
+                    upper: 100.0;
+                  };
+
+                  hexpand: true;
+                  draw-value: false;
+                }
+              }
             }
           }
-        }
-      }
 
-      // Input section when no devices
-      Adw.PreferencesGroup input_no_devices_group {
-        title: "Input";
-        visible: false;
+          // Input section when no devices
+          Adw.PreferencesGroup input_no_devices_group {
+            title: "Input";
+            visible: false;
 
-        Adw.ActionRow {
-          title: "Input Device";
-          subtitle: "No input devices available";
-          activatable: false;
+            Adw.ActionRow {
+              title: "Input Device";
+              subtitle: "No input devices available";
+              activatable: false;
 
-          [prefix]
-          Image {
-            icon-name: "audio-input-microphone-symbolic";
+              [prefix]
+              Image {
+                icon-name: "audio-input-microphone-symbolic";
+              }
+            }
           }
-        }
-      }
-    };
+        };
+      };
+    }
   };
 }
 
