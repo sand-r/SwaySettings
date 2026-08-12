@@ -1,12 +1,19 @@
 @import "./base.scss";
 
-$drop-shadow: 0 0 30px rgba(0, 0, 0, 0.4);
 $avatar-size: 128px;
+$entry-width: 320px;
 $locker-fg-color: white;
-$locker-fg-color-dim: rgba(white, 0.5);
+$clock-color: rgba(white, 0.70);
+$date-color: rgba(white, 0.62);
+$secondary-color: rgba(white, 0.70);
+$text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+$avatar-shadow: 0 0 0 1px rgba(white, 0.22),
+                0 10px 28px rgba(0, 0, 0, 0.32);
+$entry-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
 $blur-fade-ms: 300ms;
 $blur-fade-ease: ease-out;
-$blur-amount: 10px;
+$blur-amount: 8px;
+$blur-scale: 1.025;
 
 lockerwindow {
   background: transparent;
@@ -14,15 +21,18 @@ lockerwindow {
   // Force light text for all labels on the locker (over wallpaper)
   label {
     color: $locker-fg-color;
-    text-shadow: $drop-shadow;
+    text-shadow: $text-shadow;
   }
 
   .locker-wallpaper {
-    transition: filter $blur-fade-ease $blur-fade-ms;
+    transition: filter $blur-fade-ease $blur-fade-ms,
+                transform $blur-fade-ease $blur-fade-ms;
   }
 
   &.focused .locker-wallpaper {
     filter: blur($blur-amount);
+    // Overscan the blurred image so the filter never samples past its edges.
+    transform: scale($blur-scale);
   }
 
   .locker-time-box {
@@ -31,68 +41,105 @@ lockerwindow {
     .locker-time {
       font-size: 128px;
       font-weight: bold;
-      color: $locker-fg-color-dim;
+      font-feature-settings: "tnum";
+      color: $clock-color;
     }
 
     .locker-date {
       font-size: 32px;
       font-weight: bold;
-      color: $locker-fg-color-dim;
+      color: $date-color;
     }
   }
 
   .locker-content {
-    background: rgba(0, 0, 0, 0.2);
+    background-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.16),
+      rgba(0, 0, 0, 0.08) 52%,
+      rgba(0, 0, 0, 0.18)
+    );
+
+    .locker-auth {
+      min-width: $entry-width;
+    }
 
     .locker-avatar {
-      filter: drop-shadow($drop-shadow);
-      margin: 6px;
+      box-shadow: $avatar-shadow;
+      margin-bottom: 10px;
+      border-radius: 999px;
       -gtk-icon-size: $avatar-size;
     }
 
     .locker-name {
-      font-size: 18px;
-      margin: 6px;
+      font-size: 20px;
+      font-weight: 500;
       color: $locker-fg-color;
     }
 
     .locker-entry {
-      box-shadow: $drop-shadow;
-      margin: 32px 4px 4px 4px;
+      min-width: $entry-width;
+      min-height: 46px;
+      box-shadow: $entry-shadow;
+      margin-top: 20px;
+      border: 1px solid rgba(white, 0.20);
       border-radius: 100px;
-      background: rgba(0, 0, 0, 0.3);
+      outline-color: transparent;
+      outline-width: 0;
+      background: rgba(12, 12, 18, 0.52);
       color: $locker-fg-color;
+      transition: background 150ms ease-out,
+                  border-color 150ms ease-out,
+                  box-shadow 150ms ease-out;
+
+      &:focus,
+      &:focus-within {
+        border-color: rgba(white, 0.62);
+        outline-color: transparent;
+        box-shadow: 0 0 0 2px rgba(white, 0.12), $entry-shadow;
+        background: rgba(12, 12, 18, 0.64);
+      }
 
       & text {
-        margin: 0 4px;
+        margin: 0 8px;
         color: $locker-fg-color;
         caret-color: $locker-fg-color;
 
         & placeholder {
-          color: $locker-fg-color-dim;
+          color: $secondary-color;
         }
       }
 
       & image {
-        color: $locker-fg-color-dim;
+        color: $secondary-color;
       }
     }
 
     .locker-status {
-      margin: 4px 0;
-
-      &.error banner widget {
-        color: #ff6b6b;
-      }
+      min-width: $entry-width;
+      margin-top: 10px;
 
       banner widget {
-        background: transparent;
+        background: rgba(12, 12, 18, 0.48);
         color: $locker-fg-color;
-        padding: 0 32px;
-        margin: 4px;
-        border-radius: 100px;
+        padding: 5px 16px;
+        border: 1px solid rgba(white, 0.14);
+        border-radius: 14px;
+      }
+
+      banner label {
+        color: $locker-fg-color;
+        text-shadow: none;
+      }
+
+      banner.error widget {
+        background: rgba(112, 24, 30, 0.58);
+        border-color: rgba(255, 138, 128, 0.34);
+      }
+
+      banner.error label {
+        color: #ffc1bd;
       }
     }
-
   }
 }

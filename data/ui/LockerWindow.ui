@@ -61,9 +61,13 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                     <property name="hexpand">false</property>
                     <property name="vexpand">false</property>
                     <property name="orientation">1</property>
+                    <style>
+                      <class name="locker-auth"/>
+                    </style>
                     <child>
                       <object class="AdwAvatar" id="avatar">
                         <property name="can-target">false</property>
+                        <property name="halign">3</property>
                         <style>
                           <class name="locker-avatar"/>
                         </style>
@@ -91,30 +95,22 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                         </style>
                       </object>
                     </child>
-                  </object>
-                </property>
-                <property name="end-widget">
-                  <object class="GtkRevealer" id="status_revealer">
-                    <property name="reveal-child">false</property>
-                    <property name="transition-type">1</property>
-                    <property name="child">
-                      <object class="GtkScrolledWindow">
-                        <property name="hscrollbar-policy">2</property>
-                        <property name="propagate-natural-height">true</property>
+                    <child>
+                      <object class="GtkRevealer" id="status_revealer">
+                        <property name="halign">3</property>
+                        <property name="reveal-child">false</property>
+                        <property name="transition-type">1</property>
                         <property name="child">
-                          <object class="GtkViewport">
-                            <property name="child">
-                              <object class="GtkBox" id="status">
-                                <property name="orientation">1</property>
-                                <style>
-                                  <class name="locker-status"/>
-                                </style>
-                              </object>
-                            </property>
+                          <object class="GtkBox" id="status">
+                            <property name="halign">3</property>
+                            <property name="orientation">1</property>
+                            <style>
+                              <class name="locker-status"/>
+                            </style>
                           </object>
                         </property>
                       </object>
-                    </property>
+                    </child>
                   </object>
                 </property>
               </object>

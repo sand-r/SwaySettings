@@ -55,8 +55,13 @@ template $LockerWindow: Adw.ApplicationWindow {
           vexpand: false;
           orientation: vertical;
 
+          styles [
+            "locker-auth",
+          ]
+
           Adw.Avatar avatar {
             can-target: false;
+            halign: center;
 
             styles [
               "locker-avatar",
@@ -84,26 +89,21 @@ template $LockerWindow: Adw.ApplicationWindow {
               "locker-entry",
             ]
           }
-        };
 
-        end-widget: Revealer status_revealer {
-          reveal-child: false;
-          transition-type: crossfade;
+          Revealer status_revealer {
+            halign: center;
+            reveal-child: false;
+            transition-type: crossfade;
 
-          child: ScrolledWindow {
-            hscrollbar-policy: never;
-            propagate-natural-height: true;
+            child: Box status {
+              halign: center;
+              orientation: vertical;
 
-            child: Viewport {
-              child: Box status {
-                orientation: vertical;
-
-                styles [
-                  "locker-status",
-                ]
-              };
+              styles [
+                "locker-status",
+              ]
             };
-          };
+          }
         };
       }
     }
